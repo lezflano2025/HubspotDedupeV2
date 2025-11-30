@@ -1,0 +1,586 @@
+{
+  "testSuite": "Fuzzy Contact Matching Validation",
+  "version": "1.0",
+  "description": "Synthetic dataset for validating fuzzy matching algorithm with expected scores",
+  "weights": {
+    "email": 1.5,
+    "first_name": 1.2,
+    "last_name": 1.2,
+    "full_name": 1.3,
+    "phone": 1.0,
+    "company": 0.8,
+    "job_title": 0.6
+  },
+  "testCases": [
+    {
+      "id": "TC01",
+      "category": "exact_duplicate",
+      "description": "Perfect match - all fields identical",
+      "recordA": {
+        "email": "john.smith@acmecorp.com",
+        "first_name": "John",
+        "last_name": "Smith",
+        "phone": "555-123-4567",
+        "company": "Acme Corporation",
+        "job_title": "Senior Software Engineer"
+      },
+      "recordB": {
+        "email": "john.smith@acmecorp.com",
+        "first_name": "John",
+        "last_name": "Smith",
+        "phone": "555-123-4567",
+        "company": "Acme Corporation",
+        "job_title": "Senior Software Engineer"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 100,
+        "last_name": 100,
+        "full_name": 100,
+        "phone": 100,
+        "company": 100,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 100,
+        "max": 100
+      },
+      "shouldMatch": true
+    },
+    {
+      "id": "TC02",
+      "category": "exact_duplicate",
+      "description": "Exact match with case & whitespace differences",
+      "recordA": {
+        "email": "sarah.jones@techstart.io",
+        "first_name": "Sarah",
+        "last_name": "Jones",
+        "phone": "(555) 234-5678",
+        "company": "TechStart Inc",
+        "job_title": "Product Manager"
+      },
+      "recordB": {
+        "email": "SARAH.JONES@TECHSTART.IO",
+        "first_name": "  sarah  ",
+        "last_name": "JONES",
+        "phone": "555-234-5678",
+        "company": "TechStart Inc.",
+        "job_title": "Product Manager"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 100,
+        "last_name": 100,
+        "full_name": 100,
+        "phone": 100,
+        "company": 100,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 100,
+        "max": 100
+      },
+      "shouldMatch": true,
+      "notes": "Tests normalization: case, whitespace, special characters"
+    },
+    {
+      "id": "TC03",
+      "category": "near_duplicate_high",
+      "description": "Single character typo in first name",
+      "recordA": {
+        "email": "michael.chen@dataflow.com",
+        "first_name": "Michael",
+        "last_name": "Chen",
+        "phone": "555-345-6789",
+        "company": "DataFlow Systems",
+        "job_title": "Data Scientist"
+      },
+      "recordB": {
+        "email": "michael.chen@dataflow.com",
+        "first_name": "Micheal",
+        "last_name": "Chen",
+        "phone": "555-345-6789",
+        "company": "DataFlow Systems",
+        "job_title": "Data Scientist"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 86,
+        "last_name": 100,
+        "full_name": 93,
+        "phone": 100,
+        "company": 100,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 96,
+        "max": 98
+      },
+      "shouldMatch": true
+    },
+    {
+      "id": "TC04",
+      "category": "near_duplicate_high",
+      "description": "Typo in last name",
+      "recordA": {
+        "email": "robert.johnson@marketing.co",
+        "first_name": "Robert",
+        "last_name": "Johnson",
+        "phone": "555-456-7890",
+        "company": "Marketing Solutions LLC",
+        "job_title": "Marketing Director"
+      },
+      "recordB": {
+        "email": "robert.johnson@marketing.co",
+        "first_name": "Robert",
+        "last_name": "Jonson",
+        "phone": "555-456-7890",
+        "company": "Marketing Solutions LLC",
+        "job_title": "Marketing Director"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 100,
+        "last_name": 86,
+        "full_name": 93,
+        "phone": 100,
+        "company": 100,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 96,
+        "max": 98
+      },
+      "shouldMatch": true
+    },
+    {
+      "id": "TC05",
+      "category": "near_duplicate_high",
+      "description": "Phone number formatting variation",
+      "recordA": {
+        "email": "emily.davis@startupventures.com",
+        "first_name": "Emily",
+        "last_name": "Davis",
+        "phone": "5551234567",
+        "company": "Startup Ventures",
+        "job_title": "CEO"
+      },
+      "recordB": {
+        "email": "emily.davis@startupventures.com",
+        "first_name": "Emily",
+        "last_name": "Davis",
+        "phone": "+1 (555) 123-4567",
+        "company": "Startup Ventures",
+        "job_title": "CEO"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 100,
+        "last_name": 100,
+        "full_name": 100,
+        "phone": 63,
+        "company": 100,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 92,
+        "max": 95
+      },
+      "shouldMatch": true,
+      "notes": "Phone formatting differs significantly but core digits match"
+    },
+    {
+      "id": "TC06",
+      "category": "near_duplicate_high",
+      "description": "Nickname vs full first name",
+      "recordA": {
+        "email": "william.brown@consulting.net",
+        "first_name": "William",
+        "last_name": "Brown",
+        "phone": "555-567-8901",
+        "company": "Brown Consulting Group",
+        "job_title": "Principal Consultant"
+      },
+      "recordB": {
+        "email": "william.brown@consulting.net",
+        "first_name": "Bill",
+        "last_name": "Brown",
+        "phone": "555-567-8901",
+        "company": "Brown Consulting Group",
+        "job_title": "Principal Consultant"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 50,
+        "last_name": 100,
+        "full_name": 71,
+        "phone": 100,
+        "company": 100,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 88,
+        "max": 92
+      },
+      "shouldMatch": true,
+      "notes": "First name differs but email + other fields compensate"
+    },
+    {
+      "id": "TC07",
+      "category": "near_duplicate_high",
+      "description": "Company name abbreviation",
+      "recordA": {
+        "email": "jennifer.white@ibm.com",
+        "first_name": "Jennifer",
+        "last_name": "White",
+        "phone": "555-678-9012",
+        "company": "International Business Machines",
+        "job_title": "Systems Architect"
+      },
+      "recordB": {
+        "email": "jennifer.white@ibm.com",
+        "first_name": "Jennifer",
+        "last_name": "White",
+        "phone": "555-678-9012",
+        "company": "IBM",
+        "job_title": "Systems Architect"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 100,
+        "last_name": 100,
+        "full_name": 100,
+        "phone": 100,
+        "company": 23,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 90,
+        "max": 94
+      },
+      "shouldMatch": true,
+      "notes": "Company has low weight, poor company match doesn't drastically reduce overall score"
+    },
+    {
+      "id": "TC08",
+      "category": "medium_confidence",
+      "description": "Multiple minor typos",
+      "recordA": {
+        "email": "david.martinez@cloudtech.io",
+        "first_name": "David",
+        "last_name": "Martinez",
+        "phone": "555-789-0123",
+        "company": "CloudTech Solutions",
+        "job_title": "DevOps Engineer"
+      },
+      "recordB": {
+        "email": "david.martinez@cloudtech.io",
+        "first_name": "Davd",
+        "last_name": "Martines",
+        "phone": "555-789-0123",
+        "company": "CloudTech Solutions",
+        "job_title": "DevOps Enginear"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 80,
+        "last_name": 88,
+        "full_name": 85,
+        "phone": 100,
+        "company": 100,
+        "job_title": 94
+      },
+      "expectedOverallScore": {
+        "min": 92,
+        "max": 95
+      },
+      "shouldMatch": true,
+      "notes": "Multiple small typos, but email (high weight) is perfect"
+    },
+    {
+      "id": "TC09",
+      "category": "medium_confidence",
+      "description": "Different job title, same person (promotion)",
+      "recordA": {
+        "email": "amanda.lee@growth.io",
+        "first_name": "Amanda",
+        "last_name": "Lee",
+        "phone": "555-890-1234",
+        "company": "Growth Analytics Inc",
+        "job_title": "Junior Data Analyst"
+      },
+      "recordB": {
+        "email": "amanda.lee@growth.io",
+        "first_name": "Amanda",
+        "last_name": "Lee",
+        "phone": "555-890-1234",
+        "company": "Growth Analytics Inc",
+        "job_title": "Senior Data Analyst"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 100,
+        "last_name": 100,
+        "full_name": 100,
+        "phone": 100,
+        "company": 100,
+        "job_title": 76
+      },
+      "expectedOverallScore": {
+        "min": 96,
+        "max": 98
+      },
+      "shouldMatch": true,
+      "notes": "Job title changed but low weight (0.6) means minimal impact"
+    },
+    {
+      "id": "TC10",
+      "category": "medium_confidence",
+      "description": "Email domain changed, name intact (job change)",
+      "recordA": {
+        "email": "christopher.taylor@oldcompany.com",
+        "first_name": "Christopher",
+        "last_name": "Taylor",
+        "phone": "555-901-2345",
+        "company": "Old Company LLC",
+        "job_title": "Account Executive"
+      },
+      "recordB": {
+        "email": "christopher.taylor@newcompany.com",
+        "first_name": "Christopher",
+        "last_name": "Taylor",
+        "phone": "555-901-2345",
+        "company": "New Company Inc",
+        "job_title": "Account Executive"
+      },
+      "expectedFieldScores": {
+        "email": 77,
+        "first_name": 100,
+        "last_name": 100,
+        "full_name": 100,
+        "phone": 100,
+        "company": 50,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 85,
+        "max": 89
+      },
+      "shouldMatch": true,
+      "notes": "Person changed jobs - email username matches but domain differs"
+    },
+    {
+      "id": "TC11",
+      "category": "borderline",
+      "description": "Same name, different email & company",
+      "recordA": {
+        "email": "james.wilson@techcorp.com",
+        "first_name": "James",
+        "last_name": "Wilson",
+        "phone": "555-012-3456",
+        "company": "TechCorp Industries",
+        "job_title": "Software Developer"
+      },
+      "recordB": {
+        "email": "j.wilson@innovate.co",
+        "first_name": "James",
+        "last_name": "Wilson",
+        "phone": "555-012-3456",
+        "company": "Innovate Labs",
+        "job_title": "Software Developer"
+      },
+      "expectedFieldScores": {
+        "email": 50,
+        "first_name": 100,
+        "last_name": 100,
+        "full_name": 100,
+        "phone": 100,
+        "company": 30,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 77,
+        "max": 82
+      },
+      "shouldMatch": true,
+      "notes": "Common name - could be different people or job change. Phone match suggests same person"
+    },
+    {
+      "id": "TC12",
+      "category": "borderline",
+      "description": "Maiden name change (marriage)",
+      "recordA": {
+        "email": "lisa.anderson@design.com",
+        "first_name": "Lisa",
+        "last_name": "Anderson",
+        "phone": "555-123-4567",
+        "company": "Design Studio Pro",
+        "job_title": "UX Designer"
+      },
+      "recordB": {
+        "email": "lisa.thompson@design.com",
+        "first_name": "Lisa",
+        "last_name": "Thompson",
+        "phone": "555-123-4567",
+        "company": "Design Studio Pro",
+        "job_title": "UX Designer"
+      },
+      "expectedFieldScores": {
+        "email": 73,
+        "first_name": 100,
+        "last_name": 27,
+        "full_name": 64,
+        "phone": 100,
+        "company": 100,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 75,
+        "max": 80
+      },
+      "shouldMatch": true,
+      "notes": "Borderline - same phone/company/title, but last name changed. Could be name change or different person"
+    },
+    {
+      "id": "TC13",
+      "category": "borderline",
+      "description": "Similar email, name typo or different person",
+      "recordA": {
+        "email": "mark.roberts@sales.com",
+        "first_name": "Mark",
+        "last_name": "Roberts",
+        "phone": "555-234-5678",
+        "company": "Sales Force Co",
+        "job_title": "Sales Representative"
+      },
+      "recordB": {
+        "email": "mark.roberts@sales.com",
+        "first_name": "Marc",
+        "last_name": "Roberts",
+        "phone": "555-234-5679",
+        "company": "Sales Force Co",
+        "job_title": "Sales Representative"
+      },
+      "expectedFieldScores": {
+        "email": 100,
+        "first_name": 80,
+        "last_name": 100,
+        "full_name": 90,
+        "phone": 93,
+        "company": 100,
+        "job_title": 100
+      },
+      "expectedOverallScore": {
+        "min": 94,
+        "max": 97
+      },
+      "shouldMatch": true,
+      "notes": "Could be typo in first name or one digit phone error. High similarity suggests duplicate"
+    },
+    {
+      "id": "TC14",
+      "category": "non_match",
+      "description": "Different people, same company",
+      "recordA": {
+        "email": "alice.green@megacorp.com",
+        "first_name": "Alice",
+        "last_name": "Green",
+        "phone": "555-345-6789",
+        "company": "MegaCorp International",
+        "job_title": "HR Manager"
+      },
+      "recordB": {
+        "email": "bob.smith@megacorp.com",
+        "first_name": "Bob",
+        "last_name": "Smith",
+        "phone": "555-456-7890",
+        "company": "MegaCorp International",
+        "job_title": "Finance Director"
+      },
+      "expectedFieldScores": {
+        "email": 58,
+        "first_name": 23,
+        "last_name": 20,
+        "full_name": 22,
+        "phone": 47,
+        "company": 100,
+        "job_title": 30
+      },
+      "expectedOverallScore": {
+        "min": 40,
+        "max": 50
+      },
+      "shouldMatch": false,
+      "notes": "Clearly different people at same company - should NOT be flagged as duplicates"
+    },
+    {
+      "id": "TC15",
+      "category": "non_match",
+      "description": "Completely different records",
+      "recordA": {
+        "email": "susan.clark@retailking.com",
+        "first_name": "Susan",
+        "last_name": "Clark",
+        "phone": "555-567-8901",
+        "company": "Retail King Corp",
+        "job_title": "Store Manager"
+      },
+      "recordB": {
+        "email": "tony.nguyen@webdesign.io",
+        "first_name": "Tony",
+        "last_name": "Nguyen",
+        "phone": "555-678-9012",
+        "company": "Web Design Studio",
+        "job_title": "Creative Director"
+      },
+      "expectedFieldScores": {
+        "email": 30,
+        "first_name": 18,
+        "last_name": 20,
+        "full_name": 20,
+        "phone": 47,
+        "company": 25,
+        "job_title": 35
+      },
+      "expectedOverallScore": {
+        "min": 25,
+        "max": 35
+      },
+      "shouldMatch": false,
+      "notes": "Completely different people - should score very low"
+    }
+  ],
+  "validationCriteria": {
+    "overallScoreVariance": 3,
+    "fieldScoreVariance": 5,
+    "mustPass": {
+      "exact_duplicates": [
+        "TC01",
+        "TC02"
+      ],
+      "high_confidence": [
+        "TC03",
+        "TC04",
+        "TC05",
+        "TC06",
+        "TC07"
+      ],
+      "non_matches": [
+        "TC14",
+        "TC15"
+      ]
+    },
+    "shouldPass": {
+      "medium_confidence": [
+        "TC08",
+        "TC09",
+        "TC10"
+      ],
+      "borderline": [
+        "TC11",
+        "TC12",
+        "TC13"
+      ]
+    }
+  }
+}
