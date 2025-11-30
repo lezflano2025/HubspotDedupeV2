@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
   // Deduplication operations
   DEDUP_RUN_ANALYSIS: 'dedup:run-analysis',
   DEDUP_GET_GROUPS: 'dedup:get-groups',
+  DEDUP_GET_STATUS_COUNTS: 'dedup:get-status-counts',
   DEDUP_MERGE: 'dedup:merge',
 
   // Data retrieval operations
