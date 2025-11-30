@@ -74,6 +74,7 @@ export interface DuplicateGroup {
   similarityScore: number;
   matchedFields: string[];
   fieldScores?: FieldSimilarity[];
+  status?: 'unreviewed' | 'reviewed' | 'merged';
 }
 
 // Merge result
