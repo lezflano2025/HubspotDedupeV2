@@ -7,6 +7,7 @@ import { DataViewer } from '../components/DataViewer';
 import type { DuplicateGroup, DeduplicationResult } from '../../shared/types';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
+type ConfidenceFilter = 'all' | 'high' | 'medium' | 'low';
 
 const TooltipBadge = ({
   children,
@@ -52,7 +53,7 @@ export function ResultsPage() {
   const [importStatus, setImportStatus] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
-  const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
+  const [filterConfidence, setFilterConfidence] = React.useState<ConfidenceFilter>('all');
 
   // Load groups on mount and when object type changes
   useEffect(() => {
@@ -149,6 +150,23 @@ export function ResultsPage() {
     return 'danger';
   };
 
+  const confidenceCounts = React.useMemo<Record<ConfidenceFilter, number>>(() => {
+    const counts: Record<ConfidenceFilter, number> = {
+      all: groups.length,
+      high: 0,
+      medium: 0,
+      low: 0,
+    };
+
+    groups.forEach(({ similarityScore }) => {
+      if (similarityScore >= 0.95) counts.high += 1;
+      else if (similarityScore >= 0.85) counts.medium += 1;
+      else counts.low += 1;
+    });
+
+    return counts;
+  }, [groups]);
+
   const filteredGroups = React.useMemo(() => {
     return groups.filter((group) => {
       if (filterConfidence === 'all') return true;
@@ -167,6 +185,13 @@ export function ResultsPage() {
       return b.records.length - a.records.length;
     });
   }, [filteredGroups, sortBy]);
+
+  const confidenceFilters: { level: ConfidenceFilter; label: string }[] = [
+    { level: 'all', label: 'All' },
+    { level: 'high', label: 'High' },
+    { level: 'medium', label: 'Medium' },
+    { level: 'low', label: 'Low' },
+  ];
 
   if (selectedGroup) {
     return (
@@ -327,21 +352,24 @@ export function ResultsPage() {
                   <div className="flex items-center gap-2">
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Filter:</label>
                     <div className="flex gap-2">
-                      {(['all', 'high', 'medium', 'low'] as const).map((level) => (
-                        <button
-                          key={level}
-                          onClick={() => setFilterConfidence(level)}
-                          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                            filterConfidence === level
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-                          }`}
-                        >
-                          {level === 'all'
-                            ? 'All Groups'
-                            : `${level.charAt(0).toUpperCase() + level.slice(1)} Confidence`}
-                        </button>
-                      ))}
+                      {confidenceFilters.map(({ level, label }) => {
+                        const isActive = filterConfidence === level;
+                        return (
+                          <button
+                            key={level}
+                            type="button"
+                            onClick={() => setFilterConfidence(level)}
+                            aria-pressed={isActive}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500 ${
+                              isActive
+                                ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                                : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
+                            }`}
+                          >
+                            {`${label}${level === 'all' ? ' Groups' : ' Confidence'} (${confidenceCounts[level]})`}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
