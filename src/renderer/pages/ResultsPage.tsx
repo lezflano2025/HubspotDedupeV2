@@ -4,7 +4,8 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
-import type { DuplicateGroup, DeduplicationResult, FieldSimilarity } from '../../shared/types';
+import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts, FieldSimilarity } from '../../shared/types';
+import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
 
@@ -53,9 +54,16 @@ export function ResultsPage() {
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
   const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
+  const [statusCounts, setStatusCounts] = React.useState<DuplicateStatusCounts>({
+    pending: 0,
+    reviewed: 0,
+    merged: 0,
+    total: 0,
+  });
 
   const formatFieldName = (field: string) => field.replace(/_/g, ' ');
 
+  // Logic from Codex branch: Calculate top contributing fields
   const getTopContributingFields = (
     fieldScores?: FieldSimilarity[],
     matchedFields: string[] = []
@@ -76,6 +84,7 @@ export function ResultsPage() {
     return [];
   };
 
+  // Logic from Codex branch: Generate human-readable reason
   const buildDuplicateReasonSentence = (fields: FieldSimilarity[]): string => {
     if (!fields.length) {
       return 'These records share similarities across multiple fields.';
@@ -102,13 +111,34 @@ export function ResultsPage() {
     loadGroups();
   }, [objectType]);
 
+  const loadStatusCounts = async () => {
+    try {
+      const counts = await window.api.dedupGetStatusCounts(objectType);
+      setStatusCounts(counts);
+    } catch (err) {
+      console.error('Failed to load status counts:', err);
+    }
+  };
+
   const loadGroups = async () => {
     setIsLoading(true);
     setError('');
 
     try {
-      const fetchedGroups = await window.api.dedupGetGroups(objectType, 'pending');
-      setGroups(fetchedGroups);
+      // Main branch: Concurrent loading
+      const [fetchedGroups, counts] = await Promise.all([
+        window.api.dedupGetGroups(objectType, 'pending'),
+        window.api.dedupGetStatusCounts(objectType),
+      ]);
+
+      // Codex branch: Score normalization
+      const normalizedGroups = fetchedGroups.map((group) => ({
+        ...group,
+        similarityScore: normalizeSimilarityScore(group.similarityScore),
+      }));
+
+      setStatusCounts(counts);
+      setGroups(normalizedGroups);
     } catch (err) {
       console.error('Failed to load groups:', err);
       setError(err instanceof Error ? err.message : 'Failed to load duplicate groups');
@@ -173,6 +203,7 @@ export function ResultsPage() {
       if (result.success) {
         // Remove the merged group from the list
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
+        loadStatusCounts();
         setSelectedGroup(null);
         alert(`Successfully merged ${result.mergedIds.length} records!`);
       } else {
@@ -190,6 +221,30 @@ export function ResultsPage() {
     if (score >= 0.95) return 'success';
     if (score >= 0.85) return 'warning';
     return 'danger';
+  };
+
+  const getConfidenceStyles = (score: number) => {
+    if (score >= 0.95) {
+      return {
+        borderClass: 'border-l-4 border-l-green-500',
+        priorityClass: 'bg-green-50 text-green-800 dark:bg-green-900/30 dark:text-green-200',
+        priorityLabel: 'High Priority',
+      };
+    }
+
+    if (score >= 0.85) {
+      return {
+        borderClass: 'border-l-4 border-l-amber-400',
+        priorityClass: 'bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200',
+        priorityLabel: 'Medium Priority',
+      };
+    }
+
+    return {
+      borderClass: 'border-l-4 border-l-red-400',
+      priorityClass: 'bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-200',
+      priorityLabel: 'Low Priority',
+    };
   };
 
   const filteredGroups = React.useMemo(() => {
@@ -211,6 +266,10 @@ export function ResultsPage() {
     });
   }, [filteredGroups, sortBy]);
 
+  const processedCount = statusCounts.reviewed + statusCounts.merged;
+  const totalCount = statusCounts.total || groups.length;
+  const progressPercentage = totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
+
   if (selectedGroup) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
@@ -226,7 +285,7 @@ export function ResultsPage() {
           onCancel={() => setSelectedGroup(null)}
           isMerging={isMerging}
           fieldScores={selectedGroup.fieldScores}
-          similarityScore={Math.round(selectedGroup.similarityScore * 100)}
+          similarityScore={selectedGroup.similarityScore}
         />
         {error && (
           <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -240,7 +299,6 @@ export function ResultsPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Duplicate Detection</h1>
           <p className="text-gray-600 dark:text-gray-400">
@@ -248,7 +306,6 @@ export function ResultsPage() {
           </p>
         </div>
 
-        {/* Controls */}
         <Card className="mb-6">
           <CardContent>
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -328,17 +385,14 @@ export function ResultsPage() {
           </CardContent>
         </Card>
 
-        {/* Data Viewer */}
         <DataViewer objectType={objectType} />
 
-        {/* Error Display */}
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
           </div>
         )}
 
-        {/* Groups List */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -347,6 +401,24 @@ export function ResultsPage() {
             </div>
           </CardHeader>
           <CardContent>
+            <div className="mb-6 space-y-2">
+              <div className="flex flex-wrap items-center justify-between text-sm">
+                <div className="font-medium text-gray-900 dark:text-gray-100">Review Progress</div>
+                <div className="text-gray-600 dark:text-gray-400">
+                  Reviewed: {statusCounts.reviewed} • Merged: {statusCounts.merged} • Total: {totalCount}
+                </div>
+              </div>
+              <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                <div
+                  className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-500"
+                  style={{ width: `${progressPercentage}%` }}
+                ></div>
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Processed {processedCount} of {totalCount} groups
+              </div>
+            </div>
+
             {groups.length === 0 && !isLoading ? (
               <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                 <p className="text-lg mb-2">No duplicate groups found</p>
@@ -395,173 +467,168 @@ export function ResultsPage() {
 
                 {sortedGroups.map((group) => {
                   const isContact = group.type === 'contact';
-                  const similarityPercentage = Math.round(group.similarityScore * 100);
+                  // Main branch: Format similarity
+                  const similarityPercentage = formatSimilarity(group.similarityScore);
+                  // Codex branch: Get top contributing fields
                   const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
+                  // Codex branch: Generate explanation sentence
                   const duplicateReason = buildDuplicateReasonSentence(topFields);
+                  // Main branch: Styles
+                  const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
 
                   return (
                     <div
                       key={group.id}
-                      className={`border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-all ${
-                        group.similarityScore >= 0.95
-                          ? 'border-green-500 dark:border-green-600 shadow-md shadow-green-100 dark:shadow-green-900/20'
-                          : group.similarityScore >= 0.85
-                          ? 'border-yellow-400 dark:border-yellow-600'
-                          : 'border-gray-200 dark:border-gray-700'
-                      }`}
+                      className={`flex flex-col gap-3 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm bg-white dark:bg-gray-800 hover:shadow-md transition-all cursor-pointer ${borderClass}`}
                       onClick={() => setSelectedGroup(group)}
                     >
-                      {group.similarityScore >= 0.95 && (
-                        <div className="mb-3 flex items-center gap-2 text-green-700 dark:text-green-400">
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path
-                              fillRule="evenodd"
-                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          <span className="text-xs font-semibold">High Priority - Review First</span>
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <span className="font-medium text-gray-900 dark:text-white">
-                              {group.records.length} Duplicate Records
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${priorityClass}`}>
+                              {priorityLabel}
                             </span>
-                            <div className="flex gap-2 items-center flex-wrap">
-                              <TooltipBadge
-                                variant="info"
-                                tooltip="Overall similarity based on matching fields. Higher percentages indicate more identical data between these records."
-                              >
-                                {similarityPercentage}% Match
-                              </TooltipBadge>
-
-                              <TooltipBadge
-                                variant={getConfidenceBadgeVariant(group.similarityScore)}
-                                tooltip={
-                                  group.similarityScore >= 0.95
-                                    ? 'High confidence: 95%+ match. These records are very likely duplicates.'
-                                    : group.similarityScore >= 0.85
-                                    ? 'Medium confidence: 85-94% match. Review carefully before merging.'
-                                    : 'Low confidence: <85% match. May be false positives - verify before merging.'
-                                }
-                              >
-                                {group.similarityScore >= 0.95
-                                  ? 'High'
-                                  : group.similarityScore >= 0.85
-                                  ? 'Medium'
-                                  : 'Low'}{' '}
-                                Confidence
-                              </TooltipBadge>
-
-                              <Badge variant="default">{group.records.length} Records</Badge>
-                            </div>
+                            <Badge variant="default">Group ID: {group.id}</Badge>
                           </div>
+                          <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                            {group.records.length} Duplicate Records · {similarityPercentage}% Match
+                          </div>
+                          <div className="flex gap-2 items-center flex-wrap">
+                            <TooltipBadge
+                              variant="info"
+                              tooltip="Overall similarity based on matching fields. Higher percentages indicate more identical data between these records."
+                            >
+                              {similarityPercentage}% Match
+                            </TooltipBadge>
 
-                          {/* Show key fields for each record */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
-                            {group.records.slice(0, 3).map((record, idx) => (
-                              <div
-                                key={idx}
-                                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2"
-                              >
-                                <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
-                                  Record {idx + 1}
-                                </div>
-                                {isContact ? (
-                                  <div className="space-y-1 text-xs">
-                                    {record.first_name || record.last_name ? (
-                                      <div className="font-medium text-gray-900 dark:text-white truncate">
-                                        {record.first_name} {record.last_name}
-                                      </div>
-                                    ) : null}
-                                    {record.email && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        📧 {record.email as string}
-                                      </div>
-                                    )}
-                                    {record.company && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        🏢 {record.company as string}
-                                      </div>
-                                    )}
-                                    {record.job_title && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        💼 {record.job_title as string}
-                                      </div>
-                                    )}
+                            <TooltipBadge
+                              variant={getConfidenceBadgeVariant(group.similarityScore)}
+                              tooltip={
+                                group.similarityScore >= 0.95
+                                  ? 'High confidence: 95%+ match. These records are very likely duplicates.'
+                                  : group.similarityScore >= 0.85
+                                  ? 'Medium confidence: 85-94% match. Review carefully before merging.'
+                                  : 'Low confidence: <85% match. May be false positives - verify before merging.'
+                              }
+                            >
+                              {group.similarityScore >= 0.95
+                                ? 'High'
+                                : group.similarityScore >= 0.85
+                                ? 'Medium'
+                                : 'Low'}{' '}
+                              Confidence
+                            </TooltipBadge>
+
+                            <Badge variant="default">{group.records.length} Records</Badge>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <Badge variant={getConfidenceBadgeVariant(group.similarityScore)}>{similarityPercentage}% Confidence</Badge>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedGroup(group);
+                            }}
+                          >
+                            Review →
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Show key fields for each record */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+                        {group.records.slice(0, 3).map((record, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2"
+                          >
+                            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+                              Record {idx + 1}
+                            </div>
+                            {isContact ? (
+                              <div className="space-y-1 text-xs">
+                                {record.first_name || record.last_name ? (
+                                  <div className="font-medium text-gray-900 dark:text-white truncate">
+                                    {record.first_name} {record.last_name}
                                   </div>
-                                ) : (
-                                  <div className="space-y-1 text-xs">
-                                    {record.name && (
-                                      <div className="font-medium text-gray-900 dark:text-white truncate">
-                                        {record.name as string}
-                                      </div>
-                                    )}
-                                    {record.domain && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        🌐 {record.domain as string}
-                                      </div>
-                                    )}
-                                    {record.phone && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        📱 {record.phone as string}
-                                      </div>
-                                    )}
-                                    {record.city && record.state && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        📍 {record.city as string}, {record.state as string}
-                                      </div>
-                                    )}
+                                ) : null}
+                                {record.email && (
+                                  <div className="text-gray-600 dark:text-gray-400 truncate">
+                                    📧 {record.email as string}
+                                  </div>
+                                )}
+                                {record.company && (
+                                  <div className="text-gray-600 dark:text-gray-400 truncate">
+                                    🏢 {record.company as string}
+                                  </div>
+                                )}
+                                {record.job_title && (
+                                  <div className="text-gray-600 dark:text-gray-400 truncate">
+                                    💼 {record.job_title as string}
                                   </div>
                                 )}
                               </div>
-                            ))}
-                            {group.records.length > 3 && (
-                              <div className="flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
-                                +{group.records.length - 3} more
+                            ) : (
+                              <div className="space-y-1 text-xs">
+                                {record.name && (
+                                  <div className="font-medium text-gray-900 dark:text-white truncate">
+                                    {record.name as string}
+                                  </div>
+                                )}
+                                {record.domain && (
+                                  <div className="text-gray-600 dark:text-gray-400 truncate">
+                                    🌐 {record.domain as string}
+                                  </div>
+                                )}
+                                {record.phone && (
+                                  <div className="text-gray-600 dark:text-gray-400 truncate">
+                                    📱 {record.phone as string}
+                                  </div>
+                                )}
+                                {record.city && record.state && (
+                                  <div className="text-gray-600 dark:text-gray-400 truncate">
+                                    📍 {record.city as string}, {record.state as string}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
-
-                          <div className="mt-3 mb-2">
-                            <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Why these might be duplicates:
-                            </div>
-                            <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {topFields.slice(0, 5).map((field) => (
-                                <span
-                                  key={field.field}
-                                  className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
-                                >
-                                  {formatFieldName(field.field)} • {Math.round(field.score)}%
-                                </span>
-                              ))}
-                              {topFields.length > 5 && (
-                                <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
-                                  +{topFields.length - 5} more
-                                </span>
-                              )}
-                            </div>
+                        ))}
+                        {group.records.length > 3 && (
+                          <div className="flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
+                            +{group.records.length - 3} more
                           </div>
+                        )}
+                      </div>
 
-                          <div className="text-sm text-gray-600 dark:text-gray-400 font-mono">
-                            Group ID: {group.id}
-                          </div>
+                      <div className="mt-3 mb-2">
+                        <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                          Why these might be duplicates:
                         </div>
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedGroup(group);
-                          }}
-                        >
-                          Review →
-                        </Button>
+                        {/* Render the human-readable reason */}
+                        <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
+                        
+                        <div className="flex flex-wrap gap-1.5">
+                          {topFields.slice(0, 5).map((field) => (
+                            <span
+                              key={field.field}
+                              className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
+                            >
+                              {formatFieldName(field.field)} • {Math.round(field.score)}%
+                            </span>
+                          ))}
+                          {topFields.length > 5 && (
+                            <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
+                              +{topFields.length - 5} more
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-sm text-gray-600 dark:text-gray-400 font-mono">
+                        Group ID: {group.id}
                       </div>
                     </div>
                   );
