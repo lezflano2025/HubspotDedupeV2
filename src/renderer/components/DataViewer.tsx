@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from './Card';
 import { Button } from './Button';
 import type { ContactData, CompanyData } from '../../shared/types';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+// RESOLUTION: Using codex's smarter system properties key set
+import { SYSTEM_PROPERTY_KEYS } from '../../shared/systemProperties';
 
 interface DataViewerProps {
   objectType: 'contact' | 'company';
@@ -15,7 +17,28 @@ export function DataViewer({ objectType }: DataViewerProps) {
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<ContactData | CompanyData | null>(null);
-  const [showProperties, setShowProperties] = useState(false);
+  // RESOLUTION: Using 'codex' logic for persistent system property toggling
+  const [showSystemProperties, setShowSystemProperties] = useState(false);
+
+  const systemPropertyKeySet = useMemo(
+    () => new Set(Array.from(SYSTEM_PROPERTY_KEYS).map((key) => key.toLowerCase())),
+    []
+  );
+
+  const storageKey = useMemo(() => `showSystemProperties:${objectType}`, [objectType]);
+
+  useEffect(() => {
+    const storedPreference = window.localStorage.getItem(storageKey);
+    setShowSystemProperties(storedPreference === 'true');
+  }, [storageKey]);
+
+  const toggleSystemProperties = useCallback(() => {
+    setShowSystemProperties((prev) => {
+      const next = !prev;
+      window.localStorage.setItem(storageKey, String(next));
+      return next;
+    });
+  }, [storageKey]);
 
   // Load count on mount and when objectType changes
   useEffect(() => {
@@ -71,46 +94,48 @@ export function DataViewer({ objectType }: DataViewerProps) {
     }
   };
 
-  useEffect(() => {
-    setShowProperties(false);
-  }, [selectedRecord]);
-
   const renderPropertiesSection = (properties: Record<string, unknown>) => {
-    const entries = Object.entries(properties);
+    if (Object.keys(properties).length === 0) return null;
 
-    if (entries.length === 0) return null;
+    const allEntries = Object.entries(properties);
+    const visibleEntries = allEntries.filter(
+      ([key]) => showSystemProperties || !systemPropertyKeySet.has(key.toLowerCase())
+    );
+    const hiddenSystemCount = allEntries.length - visibleEntries.length;
 
     return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-            All Properties ({entries.length})
-          </h5>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="flex items-center gap-2"
-            onClick={() => setShowProperties((prev) => !prev)}
-          >
-            {showProperties ? 'Hide' : 'Show'}
-            {showProperties ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </Button>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-sm font-medium text-gray-600 dark:text-gray-400">
+            All Properties ({allEntries.length})
+          </label>
+          {hiddenSystemCount > 0 && (
+            <Button variant="secondary" size="sm" onClick={toggleSystemProperties}>
+              {showSystemProperties
+                ? 'Hide system properties'
+                : `Show system properties (${hiddenSystemCount})`}
+            </Button>
+          )}
         </div>
-
-        <div className="rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-          {showProperties ? (
-            <div className="max-h-48 overflow-y-auto p-3">
-              <div className="grid grid-cols-1 gap-2 text-xs">
-                {entries.map(([key, value]) => (
-                  <div key={key} className="flex gap-2">
-                    <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[150px]">{key}:</span>
-                    <span className="text-gray-600 dark:text-gray-400 break-all">{String(value)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+        {!showSystemProperties && hiddenSystemCount > 0 && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            System properties are hidden from view. Toggle to reveal them.
+          </p>
+        )}
+        <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 max-h-64 overflow-y-auto">
+          {visibleEntries.length === 0 ? (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              No non-system properties to display.
+            </p>
           ) : (
-            <div className="p-3 text-xs text-gray-500 dark:text-gray-400">Expand to view all properties.</div>
+            <div className="grid grid-cols-1 gap-2 text-xs">
+              {visibleEntries.map(([key, value]) => (
+                <div key={key} className="flex gap-2">
+                  <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[150px]">{key}:</span>
+                  <span className="text-gray-600 dark:text-gray-400 break-all">{String(value)}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -119,7 +144,7 @@ export function DataViewer({ objectType }: DataViewerProps) {
 
   const renderContactDetails = (contact: ContactData) => {
     const properties = parseProperties(contact.properties);
-    const propertyCount = Object.keys(properties).length;
+    // Note: propertyCount logic moved inside renderPropertiesSection for better accuracy with filtering
 
     return (
       <div className="space-y-6">
@@ -166,10 +191,6 @@ export function DataViewer({ objectType }: DataViewerProps) {
                 {new Date(contact.imported_at).toLocaleString()}
               </p>
             </div>
-            <div>
-              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Property Count</label>
-              <p className="text-sm text-gray-900 dark:text-white">{propertyCount}</p>
-            </div>
           </div>
         </div>
 
@@ -180,7 +201,6 @@ export function DataViewer({ objectType }: DataViewerProps) {
 
   const renderCompanyDetails = (company: CompanyData) => {
     const properties = parseProperties(company.properties);
-    const propertyCount = Object.keys(properties).length;
 
     return (
       <div className="space-y-6">
@@ -230,10 +250,6 @@ export function DataViewer({ objectType }: DataViewerProps) {
               <p className="text-sm text-gray-900 dark:text-white">
                 {new Date(company.imported_at).toLocaleString()}
               </p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Property Count</label>
-              <p className="text-sm text-gray-900 dark:text-white">{propertyCount}</p>
             </div>
           </div>
         </div>

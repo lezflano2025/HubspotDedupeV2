@@ -4,6 +4,8 @@ import { Badge } from './Badge';
 import { Button } from './Button';
 import { clsx } from 'clsx';
 import type { FieldSimilarity } from '../../shared/types';
+// RESOLUTION: Import both the system keys (Codex) and formatter (Main)
+import { SYSTEM_PROPERTY_KEYS } from '../../shared/systemProperties';
 import { formatSimilarity } from '../../shared/formatSimilarity';
 
 interface Record {
@@ -27,8 +29,9 @@ const CONTACT_KEY_FIELDS = ['email', 'first_name', 'last_name', 'company', 'job_
 // Key fields to show at the top for companies
 const COMPANY_KEY_FIELDS = ['name', 'domain', 'phone', 'city', 'state'];
 
-// System fields to exclude
-const EXCLUDED_FIELDS = new Set([
+// RESOLUTION: Use dynamic exclusions (Codex) instead of hardcoded list
+const EXCLUDED_FIELDS = new Set<string>([
+  ...Array.from(SYSTEM_PROPERTY_KEYS),
   'id',
   'hs_id',
   'hs_object_id',
