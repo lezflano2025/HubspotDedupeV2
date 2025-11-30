@@ -4,7 +4,7 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
-import type { DuplicateGroup, DeduplicationResult } from '../../shared/types';
+import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts } from '../../shared/types';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
 
@@ -53,18 +53,37 @@ export function ResultsPage() {
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
   const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
+  const [statusCounts, setStatusCounts] = React.useState<DuplicateStatusCounts>({
+    pending: 0,
+    reviewed: 0,
+    merged: 0,
+    total: 0,
+  });
 
   // Load groups on mount and when object type changes
   useEffect(() => {
     loadGroups();
   }, [objectType]);
 
+  const loadStatusCounts = async () => {
+    try {
+      const counts = await window.api.dedupGetStatusCounts(objectType);
+      setStatusCounts(counts);
+    } catch (err) {
+      console.error('Failed to load status counts:', err);
+    }
+  };
+
   const loadGroups = async () => {
     setIsLoading(true);
     setError('');
 
     try {
-      const fetchedGroups = await window.api.dedupGetGroups(objectType, 'pending');
+      const [fetchedGroups, counts] = await Promise.all([
+        window.api.dedupGetGroups(objectType, 'pending'),
+        window.api.dedupGetStatusCounts(objectType),
+      ]);
+      setStatusCounts(counts);
       setGroups(fetchedGroups);
     } catch (err) {
       console.error('Failed to load groups:', err);
@@ -130,6 +149,7 @@ export function ResultsPage() {
       if (result.success) {
         // Remove the merged group from the list
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
+        loadStatusCounts();
         setSelectedGroup(null);
         alert(`Successfully merged ${result.mergedIds.length} records!`);
       } else {
@@ -167,6 +187,10 @@ export function ResultsPage() {
       return b.records.length - a.records.length;
     });
   }, [filteredGroups, sortBy]);
+
+  const processedCount = statusCounts.reviewed + statusCounts.merged;
+  const totalCount = statusCounts.total || groups.length;
+  const progressPercentage = totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
 
   if (selectedGroup) {
     return (
@@ -304,6 +328,24 @@ export function ResultsPage() {
             </div>
           </CardHeader>
           <CardContent>
+            <div className="mb-6 space-y-2">
+              <div className="flex flex-wrap items-center justify-between text-sm">
+                <div className="font-medium text-gray-900 dark:text-gray-100">Review Progress</div>
+                <div className="text-gray-600 dark:text-gray-400">
+                  Reviewed: {statusCounts.reviewed} • Merged: {statusCounts.merged} • Total: {totalCount}
+                </div>
+              </div>
+              <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                <div
+                  className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-500"
+                  style={{ width: `${progressPercentage}%` }}
+                ></div>
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Processed {processedCount} of {totalCount} groups
+              </div>
+            </div>
+
             {groups.length === 0 && !isLoading ? (
               <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                 <p className="text-lg mb-2">No duplicate groups found</p>

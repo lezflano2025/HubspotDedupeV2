@@ -182,12 +182,34 @@ ipcMain.handle(IPC_CHANNELS.DEDUP_GET_GROUPS, async (_event, type: 'contact' | '
         similarityScore: matches[0]?.match_score || 0,
         matchedFields: matches[0]?.matched_fields ? (typeof JSON.parse(matches[0].matched_fields) === 'object' && !Array.isArray(JSON.parse(matches[0].matched_fields)) ? JSON.parse(matches[0].matched_fields).fields || [] : JSON.parse(matches[0].matched_fields)) : [],
         fieldScores,
+        status: group.status,
       };
     });
 
     return groupsWithMatches;
   } catch (error) {
     console.error('Error getting duplicate groups:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle(IPC_CHANNELS.DEDUP_GET_STATUS_COUNTS, async (_event, type: 'contact' | 'company') => {
+  try {
+    const counts = DuplicateGroupRepository.countByStatus(type);
+    const pending = counts.pending || 0;
+    const reviewed = counts.reviewed || 0;
+    const merged = counts.merged || 0;
+    const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+
+    return {
+      ...counts,
+      pending,
+      reviewed,
+      merged,
+      total,
+    };
+  } catch (error) {
+    console.error('Error getting duplicate group status counts:', error);
     throw error;
   }
 });
