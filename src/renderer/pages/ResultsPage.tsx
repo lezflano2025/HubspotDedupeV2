@@ -6,6 +6,40 @@ import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
 import type { DuplicateGroup, DeduplicationResult } from '../../shared/types';
 
+type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
+
+const TooltipBadge = ({
+  children,
+  tooltip,
+  variant,
+}: {
+  children: React.ReactNode;
+  tooltip: string;
+  variant: BadgeVariant;
+}) => {
+  const [showTooltip, setShowTooltip] = React.useState(false);
+
+  return (
+    <div className="relative inline-block">
+      <div
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        className="cursor-help"
+      >
+        <Badge variant={variant}>{children}</Badge>
+      </div>
+      {showTooltip && (
+        <div className="absolute z-10 px-3 py-2 text-xs font-normal text-white bg-gray-900 rounded-lg shadow-lg bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64">
+          {tooltip}
+          <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
+            <div className="border-4 border-transparent border-t-gray-900"></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export function ResultsPage() {
   const [objectType, setObjectType] = useState<'contact' | 'company'>('contact');
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
@@ -107,10 +141,10 @@ export function ResultsPage() {
     }
   };
 
-  const getConfidenceBadge = (score: number) => {
-    if (score >= 0.95) return <Badge variant="success">High</Badge>;
-    if (score >= 0.85) return <Badge variant="warning">Medium</Badge>;
-    return <Badge variant="danger">Low</Badge>;
+  const getConfidenceBadgeVariant = (score: number): BadgeVariant => {
+    if (score >= 0.95) return 'success';
+    if (score >= 0.85) return 'warning';
+    return 'danger';
   };
 
   if (selectedGroup) {
@@ -272,8 +306,34 @@ export function ResultsPage() {
                             <span className="font-medium text-gray-900 dark:text-white">
                               {group.records.length} Duplicate Records
                             </span>
-                            {getConfidenceBadge(group.similarityScore)}
-                            <Badge variant="info">{similarityPercentage}% Match</Badge>
+                            <div className="flex gap-2 items-center flex-wrap">
+                              <TooltipBadge
+                                variant="info"
+                                tooltip="Overall similarity based on matching fields. Higher percentages indicate more identical data between these records."
+                              >
+                                {similarityPercentage}% Match
+                              </TooltipBadge>
+
+                              <TooltipBadge
+                                variant={getConfidenceBadgeVariant(group.similarityScore)}
+                                tooltip={
+                                  group.similarityScore >= 0.95
+                                    ? 'High confidence: 95%+ match. These records are very likely duplicates.'
+                                    : group.similarityScore >= 0.85
+                                    ? 'Medium confidence: 85-94% match. Review carefully before merging.'
+                                    : 'Low confidence: <85% match. May be false positives - verify before merging.'
+                                }
+                              >
+                                {group.similarityScore >= 0.95
+                                  ? 'High'
+                                  : group.similarityScore >= 0.85
+                                  ? 'Medium'
+                                  : 'Low'}{' '}
+                                Confidence
+                              </TooltipBadge>
+
+                              <Badge variant="default">{group.records.length} Records</Badge>
+                            </div>
                           </div>
 
                           {/* Show key fields for each record */}
