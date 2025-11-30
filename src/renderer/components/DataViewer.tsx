@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from './Card';
 import { Button } from './Button';
 import type { ContactData, CompanyData } from '../../shared/types';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+// RESOLUTION: Using codex's smarter system properties key set
 import { SYSTEM_PROPERTY_KEYS } from '../../shared/systemProperties';
 
 interface DataViewerProps {
@@ -16,6 +17,7 @@ export function DataViewer({ objectType }: DataViewerProps) {
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<ContactData | CompanyData | null>(null);
+  // RESOLUTION: Using 'codex' logic for persistent system property toggling
   const [showSystemProperties, setShowSystemProperties] = useState(false);
 
   const systemPropertyKeySet = useMemo(
@@ -142,43 +144,53 @@ export function DataViewer({ objectType }: DataViewerProps) {
 
   const renderContactDetails = (contact: ContactData) => {
     const properties = parseProperties(contact.properties);
+    // Note: propertyCount logic moved inside renderPropertiesSection for better accuracy with filtering
 
     return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">HubSpot ID</label>
-            <p className="text-sm text-gray-900 dark:text-white font-mono">{contact.hs_id}</p>
+      <div className="space-y-6">
+        <div className="space-y-3">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Core Info</h5>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Email</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.email || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">First Name</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.first_name || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Last Name</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.last_name || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Phone</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.phone || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Company</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.company || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Job Title</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.job_title || 'N/A'}</p>
+            </div>
           </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Email</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.email || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">First Name</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.first_name || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Last Name</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.last_name || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Phone</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.phone || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Company</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.company || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Job Title</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.job_title || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Imported At</label>
-            <p className="text-sm text-gray-900 dark:text-white">
-              {new Date(contact.imported_at).toLocaleString()}
-            </p>
+        </div>
+
+        <div className="space-y-3">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Metadata</h5>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">HubSpot ID</label>
+              <p className="text-sm text-gray-900 dark:text-white font-mono">{contact.hs_id}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Imported At</label>
+              <p className="text-sm text-gray-900 dark:text-white">
+                {new Date(contact.imported_at).toLocaleString()}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -191,45 +203,54 @@ export function DataViewer({ objectType }: DataViewerProps) {
     const properties = parseProperties(company.properties);
 
     return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">HubSpot ID</label>
-            <p className="text-sm text-gray-900 dark:text-white font-mono">{company.hs_id}</p>
+      <div className="space-y-6">
+        <div className="space-y-3">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Core Info</h5>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Name</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.name || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Domain</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.domain || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Phone</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.phone || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">City</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.city || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">State</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.state || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Country</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.country || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Industry</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.industry || 'N/A'}</p>
+            </div>
           </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Name</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.name || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Domain</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.domain || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Phone</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.phone || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">City</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.city || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">State</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.state || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Country</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.country || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Industry</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.industry || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Imported At</label>
-            <p className="text-sm text-gray-900 dark:text-white">
-              {new Date(company.imported_at).toLocaleString()}
-            </p>
+        </div>
+
+        <div className="space-y-3">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Metadata</h5>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">HubSpot ID</label>
+              <p className="text-sm text-gray-900 dark:text-white font-mono">{company.hs_id}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Imported At</label>
+              <p className="text-sm text-gray-900 dark:text-white">
+                {new Date(company.imported_at).toLocaleString()}
+              </p>
+            </div>
           </div>
         </div>
 
