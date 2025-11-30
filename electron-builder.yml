@@ -1,0 +1,24 @@
+appId: com.hubspot.deduplicator
+productName: HubSpot Deduplicator
+directories:
+  buildResources: build
+  output: release
+files:
+  - dist/**/*
+  - package.json
+extraMetadata:
+  main: dist/main/main.js
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+mac:
+  target:
+    - dmg
+  icon: build/icon.icns
+  category: public.app-category.productivity
+linux:
+  target:
+    - AppImage
+  icon: build/icon.png
+  category: Utility

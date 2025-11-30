@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run build:main:*)",
+      "Bash(npm run dev:*)",
+      "Bash(cat:*)",
+      "Bash(sqlite3:*)",
+      "Bash(node check-db.js:*)",
+      "Bash(node check-db.cjs:*)",
+      "Bash(npm rebuild:*)",
+      "Bash(node test-insert.cjs:*)",
+      "Bash(npm run rebuild:*)",
+      "Bash(npx electron-rebuild)",
+      "Bash(npx @electron/rebuild)",
+      "Bash(taskkill:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
