@@ -15,6 +15,7 @@ export function DataViewer({ objectType }: DataViewerProps) {
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<ContactData | CompanyData | null>(null);
+  const [showProperties, setShowProperties] = useState(false);
 
   // Load count on mount and when objectType changes
   useEffect(() => {
@@ -70,140 +71,174 @@ export function DataViewer({ objectType }: DataViewerProps) {
     }
   };
 
-  const renderContactDetails = (contact: ContactData) => {
-    const properties = parseProperties(contact.properties);
+  useEffect(() => {
+    setShowProperties(false);
+  }, [selectedRecord]);
+
+  const renderPropertiesSection = (properties: Record<string, unknown>) => {
+    const entries = Object.entries(properties);
+
+    if (entries.length === 0) return null;
 
     return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">HubSpot ID</label>
-            <p className="text-sm text-gray-900 dark:text-white font-mono">{contact.hs_id}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Email</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.email || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">First Name</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.first_name || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Last Name</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.last_name || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Phone</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.phone || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Company</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.company || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Job Title</label>
-            <p className="text-sm text-gray-900 dark:text-white">{contact.job_title || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Imported At</label>
-            <p className="text-sm text-gray-900 dark:text-white">
-              {new Date(contact.imported_at).toLocaleString()}
-            </p>
-          </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+            All Properties ({entries.length})
+          </h5>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="flex items-center gap-2"
+            onClick={() => setShowProperties((prev) => !prev)}
+          >
+            {showProperties ? 'Hide' : 'Show'}
+            {showProperties ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </Button>
         </div>
 
-        {Object.keys(properties).length > 0 && (
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2 block">
-              All Properties ({Object.keys(properties).length})
-            </label>
-            <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 max-h-64 overflow-y-auto">
+        <div className="rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+          {showProperties ? (
+            <div className="max-h-48 overflow-y-auto p-3">
               <div className="grid grid-cols-1 gap-2 text-xs">
-                {Object.entries(properties).map(([key, value]) => (
+                {entries.map(([key, value]) => (
                   <div key={key} className="flex gap-2">
-                    <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[150px]">
-                      {key}:
-                    </span>
-                    <span className="text-gray-600 dark:text-gray-400 break-all">
-                      {String(value)}
-                    </span>
+                    <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[150px]">{key}:</span>
+                    <span className="text-gray-600 dark:text-gray-400 break-all">{String(value)}</span>
                   </div>
                 ))}
               </div>
             </div>
+          ) : (
+            <div className="p-3 text-xs text-gray-500 dark:text-gray-400">Expand to view all properties.</div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderContactDetails = (contact: ContactData) => {
+    const properties = parseProperties(contact.properties);
+    const propertyCount = Object.keys(properties).length;
+
+    return (
+      <div className="space-y-6">
+        <div className="space-y-3">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Core Info</h5>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Email</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.email || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">First Name</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.first_name || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Last Name</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.last_name || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Phone</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.phone || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Company</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.company || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Job Title</label>
+              <p className="text-sm text-gray-900 dark:text-white">{contact.job_title || 'N/A'}</p>
+            </div>
           </div>
-        )}
+        </div>
+
+        <div className="space-y-3">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Metadata</h5>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">HubSpot ID</label>
+              <p className="text-sm text-gray-900 dark:text-white font-mono">{contact.hs_id}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Imported At</label>
+              <p className="text-sm text-gray-900 dark:text-white">
+                {new Date(contact.imported_at).toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Property Count</label>
+              <p className="text-sm text-gray-900 dark:text-white">{propertyCount}</p>
+            </div>
+          </div>
+        </div>
+
+        {renderPropertiesSection(properties)}
       </div>
     );
   };
 
   const renderCompanyDetails = (company: CompanyData) => {
     const properties = parseProperties(company.properties);
+    const propertyCount = Object.keys(properties).length;
 
     return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">HubSpot ID</label>
-            <p className="text-sm text-gray-900 dark:text-white font-mono">{company.hs_id}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Name</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.name || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Domain</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.domain || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Phone</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.phone || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">City</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.city || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">State</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.state || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Country</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.country || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Industry</label>
-            <p className="text-sm text-gray-900 dark:text-white">{company.industry || 'N/A'}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Imported At</label>
-            <p className="text-sm text-gray-900 dark:text-white">
-              {new Date(company.imported_at).toLocaleString()}
-            </p>
+      <div className="space-y-6">
+        <div className="space-y-3">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Core Info</h5>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Name</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.name || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Domain</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.domain || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Phone</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.phone || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">City</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.city || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">State</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.state || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Country</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.country || 'N/A'}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Industry</label>
+              <p className="text-sm text-gray-900 dark:text-white">{company.industry || 'N/A'}</p>
+            </div>
           </div>
         </div>
 
-        {Object.keys(properties).length > 0 && (
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2 block">
-              All Properties ({Object.keys(properties).length})
-            </label>
-            <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 max-h-64 overflow-y-auto">
-              <div className="grid grid-cols-1 gap-2 text-xs">
-                {Object.entries(properties).map(([key, value]) => (
-                  <div key={key} className="flex gap-2">
-                    <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[150px]">
-                      {key}:
-                    </span>
-                    <span className="text-gray-600 dark:text-gray-400 break-all">
-                      {String(value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+        <div className="space-y-3">
+          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Metadata</h5>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">HubSpot ID</label>
+              <p className="text-sm text-gray-900 dark:text-white font-mono">{company.hs_id}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Imported At</label>
+              <p className="text-sm text-gray-900 dark:text-white">
+                {new Date(company.imported_at).toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Property Count</label>
+              <p className="text-sm text-gray-900 dark:text-white">{propertyCount}</p>
             </div>
           </div>
-        )}
+        </div>
+
+        {renderPropertiesSection(properties)}
       </div>
     );
   };
