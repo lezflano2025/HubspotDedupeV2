@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
 import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts } from '../../shared/types';
+import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
 
@@ -65,26 +66,25 @@ export function ResultsPage() {
     loadGroups();
   }, [objectType]);
 
-  const loadStatusCounts = async () => {
-    try {
-      const counts = await window.api.dedupGetStatusCounts(objectType);
-      setStatusCounts(counts);
-    } catch (err) {
-      console.error('Failed to load status counts:', err);
-    }
-  };
-
   const loadGroups = async () => {
     setIsLoading(true);
     setError('');
 
     try {
+      // Execute both fetches concurrently
       const [fetchedGroups, counts] = await Promise.all([
         window.api.dedupGetGroups(objectType, 'pending'),
         window.api.dedupGetStatusCounts(objectType),
       ]);
+
+      // Normalize scores for the groups
+      const normalizedGroups = fetchedGroups.map((group) => ({
+        ...group,
+        similarityScore: normalizeSimilarityScore(group.similarityScore),
+      }));
+
       setStatusCounts(counts);
-      setGroups(fetchedGroups);
+      setGroups(normalizedGroups);
     } catch (err) {
       console.error('Failed to load groups:', err);
       setError(err instanceof Error ? err.message : 'Failed to load duplicate groups');
@@ -149,7 +149,10 @@ export function ResultsPage() {
       if (result.success) {
         // Remove the merged group from the list
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
-        loadStatusCounts();
+        // Refresh counts
+        const counts = await window.api.dedupGetStatusCounts(objectType);
+        setStatusCounts(counts);
+        
         setSelectedGroup(null);
         alert(`Successfully merged ${result.mergedIds.length} records!`);
       } else {
@@ -231,7 +234,7 @@ export function ResultsPage() {
           onCancel={() => setSelectedGroup(null)}
           isMerging={isMerging}
           fieldScores={selectedGroup.fieldScores}
-          similarityScore={Math.round(selectedGroup.similarityScore * 100)}
+          similarityScore={selectedGroup.similarityScore}
         />
         {error && (
           <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -418,7 +421,7 @@ export function ResultsPage() {
 
                 {sortedGroups.map((group) => {
                   const isContact = group.type === 'contact';
-                  const similarityPercentage = Math.round(group.similarityScore * 100);
+                  const similarityPercentage = formatSimilarity(group.similarityScore);
                   const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
 
                   return (

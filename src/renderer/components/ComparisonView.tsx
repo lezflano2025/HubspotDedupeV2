@@ -4,6 +4,7 @@ import { Badge } from './Badge';
 import { Button } from './Button';
 import { clsx } from 'clsx';
 import type { FieldSimilarity } from '../../shared/types';
+import { formatSimilarity } from '../../shared/formatSimilarity';
 
 interface Record {
   hs_id: string;
@@ -52,10 +53,13 @@ function FieldComparison({
   goldenIndex?: number;
   similarityScore?: number;
 }) {
-  const badgeVariant = similarityScore !== undefined
-    ? similarityScore >= 90
+  const formattedSimilarity =
+    similarityScore !== undefined ? formatSimilarity(similarityScore) : undefined;
+
+  const badgeVariant = formattedSimilarity !== undefined
+    ? formattedSimilarity >= 90
       ? 'success'
-      : similarityScore >= 70
+      : formattedSimilarity >= 70
       ? 'warning'
       : 'danger'
     : 'info';
@@ -92,13 +96,13 @@ function FieldComparison({
               </div>
             )}
           </div>
-          {similarityScore !== undefined && (
+          {formattedSimilarity !== undefined && (
             <div className="group relative">
-              <Badge variant={badgeVariant}>{Math.round(similarityScore)}% match</Badge>
+              <Badge variant={badgeVariant}>{formattedSimilarity}% match</Badge>
               <div className="invisible group-hover:visible absolute z-10 px-3 py-2 text-xs font-normal text-white bg-gray-900 rounded-lg shadow-lg bottom-full left-0 mb-2 w-48">
-                {similarityScore >= 90
+                {formattedSimilarity >= 90
                   ? 'Strong match - values are nearly identical'
-                  : similarityScore >= 70
+                  : formattedSimilarity >= 70
                   ? 'Partial match - values have some differences'
                   : 'Weak match - values differ significantly'}
               </div>
@@ -169,6 +173,7 @@ export function ComparisonView({
   similarityScore = 0,
 }: ComparisonViewProps) {
   const [selectedPrimary, setSelectedPrimary] = React.useState<string>(goldenRecordId || records[0]?.hs_id || '');
+  const similarityPercent = formatSimilarity(similarityScore);
 
   // Determine object type based on fields
   const isContact = records.some(r => 'email' in r || 'first_name' in r);
@@ -243,12 +248,12 @@ export function ComparisonView({
           <div className="flex items-center gap-3">
             <Badge
               variant={
-                similarityScore >= 95 ? 'success' :
-                similarityScore >= 85 ? 'warning' :
+                similarityPercent >= 95 ? 'success' :
+                similarityPercent >= 85 ? 'warning' :
                 'danger'
               }
             >
-              {similarityScore}% Overall Match
+              {similarityPercent}% Overall Match
             </Badge>
             <Badge variant="info">{records.length} Duplicates</Badge>
           </div>
@@ -268,7 +273,7 @@ export function ComparisonView({
             <div className="flex-1">
               <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-1">How Similarity Works</h4>
               <p className="text-sm text-blue-800 dark:text-blue-200">
-                The <strong>{similarityScore}% overall match</strong> is calculated by comparing all fields between these records.
+                The <strong>{similarityPercent}% overall match</strong> is calculated by comparing all fields between these records.
                 Green highlights show the recommended "golden record" values. Yellow highlights indicate differences you should review.
               </p>
             </div>
@@ -309,82 +314,11 @@ export function ComparisonView({
                     <Badge variant="info">Recommended</Badge>
                   )}
                 </div>
-                {/* Show key info in card */}
-                <div className="space-y-1 text-xs text-gray-600 dark:text-gray-400">
-                  {isContact ? (
-                    <>
-                      {record.email && <div className="truncate">📧 {record.email as string}</div>}
-                      {record.company && <div className="truncate">🏢 {record.company as string}</div>}
-                      {record.phone && <div className="truncate">📱 {record.phone as string}</div>}
-                    </>
-                  ) : (
-                    <>
-                      {record.domain && <div className="truncate">🌐 {record.domain as string}</div>}
-                      {record.phone && <div className="truncate">📱 {record.phone as string}</div>}
-                      {record.city && record.state && (
-                        <div className="truncate">📍 {record.city as string}, {record.state as string}</div>
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate mt-2">
+                <div className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
                   ID: {record.hs_id}
                 </div>
               </button>
             ))}
-          </div>
-        </div>
-
-        {similarityScore < 85 && (
-          <div className="mb-4 p-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg">
-            <div className="flex items-start gap-3">
-              <svg className="w-5 h-5 text-orange-600 dark:text-orange-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                  fillRule="evenodd"
-                  d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <div>
-                <h4 className="text-sm font-semibold text-orange-900 dark:text-orange-100 mb-1">Low Confidence Match</h4>
-                <p className="text-sm text-orange-800 dark:text-orange-200">
-                  This group has less than 85% similarity. Review carefully to ensure these are actually duplicates before
-                  merging.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-            <div className="text-2xl font-bold text-green-700 dark:text-green-400">
-              {fieldScores?.filter((f) => f.score >= 90).length || 0}
-            </div>
-            <div className="text-sm text-green-600 dark:text-green-300 mt-1">Exact/Strong Matches</div>
-            <div className="text-xs text-green-700 dark:text-green-400 mt-1">Fields with 90%+ similarity</div>
-          </div>
-
-          <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-            <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-400">
-              {fieldScores?.filter((f) => f.score >= 70 && f.score < 90).length || 0}
-            </div>
-            <div className="text-sm text-yellow-600 dark:text-yellow-300 mt-1">Partial Matches</div>
-            <div className="text-xs text-yellow-700 dark:text-yellow-400 mt-1">Fields with 70-89% similarity</div>
-          </div>
-
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-            <div className="text-2xl font-bold text-gray-700 dark:text-gray-400">
-              {(() => {
-                const allFields = new Set<string>();
-                records.forEach((r) => {
-                  Object.keys(r.properties || {}).forEach((k) => allFields.add(k));
-                });
-                return allFields.size - (fieldScores?.length || 0);
-              })()}
-            </div>
-            <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">Different/Empty</div>
-            <div className="text-xs text-gray-700 dark:text-gray-400 mt-1">Fields that don't match</div>
           </div>
         </div>
 
@@ -446,6 +380,25 @@ export function ComparisonView({
           <Button variant="primary" onClick={handleMerge} isLoading={isMerging} disabled={!selectedPrimary}>
             {isMerging ? 'Merging...' : 'Merge Records'}
           </Button>
+        </div>
+
+        {/* Legend */}
+        <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Legend:</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-gray-600 dark:text-gray-400">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-green-100 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded"></div>
+              <span>Primary/Golden Record</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-yellow-100 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded"></div>
+              <span>Different Value</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-gray-100 dark:bg-gray-800 rounded"></div>
+              <span>Empty Field</span>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>
