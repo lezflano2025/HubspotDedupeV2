@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
 import type { DuplicateGroup, DeduplicationResult } from '../../shared/types';
+import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
 
@@ -65,7 +66,11 @@ export function ResultsPage() {
 
     try {
       const fetchedGroups = await window.api.dedupGetGroups(objectType, 'pending');
-      setGroups(fetchedGroups);
+      const normalizedGroups = fetchedGroups.map((group) => ({
+        ...group,
+        similarityScore: normalizeSimilarityScore(group.similarityScore),
+      }));
+      setGroups(normalizedGroups);
     } catch (err) {
       console.error('Failed to load groups:', err);
       setError(err instanceof Error ? err.message : 'Failed to load duplicate groups');
@@ -183,7 +188,7 @@ export function ResultsPage() {
           onCancel={() => setSelectedGroup(null)}
           isMerging={isMerging}
           fieldScores={selectedGroup.fieldScores}
-          similarityScore={Math.round(selectedGroup.similarityScore * 100)}
+          similarityScore={formatSimilarity(selectedGroup.similarityScore)}
         />
         {error && (
           <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -352,7 +357,7 @@ export function ResultsPage() {
 
                 {sortedGroups.map((group) => {
                   const isContact = group.type === 'contact';
-                  const similarityPercentage = Math.round(group.similarityScore * 100);
+                  const similarityPercentage = formatSimilarity(group.similarityScore);
 
                   return (
                     <div

@@ -4,6 +4,7 @@ import { Badge } from './Badge';
 import { Button } from './Button';
 import { clsx } from 'clsx';
 import type { FieldSimilarity } from '../../shared/types';
+import { formatSimilarity } from '../../shared/formatSimilarity';
 
 interface Record {
   hs_id: string;
@@ -52,10 +53,13 @@ function FieldComparison({
   goldenIndex?: number;
   similarityScore?: number;
 }) {
-  const badgeVariant = similarityScore !== undefined
-    ? similarityScore >= 90
+  const formattedSimilarity =
+    similarityScore !== undefined ? formatSimilarity(similarityScore) : undefined;
+
+  const badgeVariant = formattedSimilarity !== undefined
+    ? formattedSimilarity >= 90
       ? 'success'
-      : similarityScore >= 70
+      : formattedSimilarity >= 70
       ? 'warning'
       : 'danger'
     : 'info';
@@ -70,13 +74,13 @@ function FieldComparison({
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 capitalize">
             {label.replace(/_/g, ' ')}
           </span>
-          {similarityScore !== undefined && (
+          {formattedSimilarity !== undefined && (
             <div className="group relative">
-              <Badge variant={badgeVariant}>{Math.round(similarityScore)}% match</Badge>
+              <Badge variant={badgeVariant}>{formattedSimilarity}% match</Badge>
               <div className="invisible group-hover:visible absolute z-10 px-3 py-2 text-xs font-normal text-white bg-gray-900 rounded-lg shadow-lg bottom-full left-0 mb-2 w-48">
-                {similarityScore >= 90
+                {formattedSimilarity >= 90
                   ? 'Strong match - values are nearly identical'
-                  : similarityScore >= 70
+                  : formattedSimilarity >= 70
                   ? 'Partial match - values have some differences'
                   : 'Weak match - values differ significantly'}
               </div>
@@ -145,6 +149,7 @@ export function ComparisonView({
   similarityScore = 0,
 }: ComparisonViewProps) {
   const [selectedPrimary, setSelectedPrimary] = React.useState<string>(goldenRecordId || records[0]?.hs_id || '');
+  const similarityPercent = formatSimilarity(similarityScore);
 
   // Determine object type based on fields
   const isContact = records.some(r => 'email' in r || 'first_name' in r);
@@ -219,12 +224,12 @@ export function ComparisonView({
           <div className="flex items-center gap-3">
             <Badge
               variant={
-                similarityScore >= 95 ? 'success' :
-                similarityScore >= 85 ? 'warning' :
+                similarityPercent >= 95 ? 'success' :
+                similarityPercent >= 85 ? 'warning' :
                 'danger'
               }
             >
-              {similarityScore}% Overall Match
+              {similarityPercent}% Overall Match
             </Badge>
             <Badge variant="info">{records.length} Duplicates</Badge>
           </div>
@@ -244,7 +249,7 @@ export function ComparisonView({
             <div className="flex-1">
               <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-1">How Similarity Works</h4>
               <p className="text-sm text-blue-800 dark:text-blue-200">
-                The <strong>{similarityScore}% overall match</strong> is calculated by comparing all fields between these records.
+                The <strong>{similarityPercent}% overall match</strong> is calculated by comparing all fields between these records.
                 Green highlights show the recommended "golden record" values. Yellow highlights indicate differences you should review.
               </p>
             </div>
@@ -311,7 +316,7 @@ export function ComparisonView({
           </div>
         </div>
 
-        {similarityScore < 85 && (
+        {similarityPercent < 85 && (
           <div className="mb-4 p-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg">
             <div className="flex items-start gap-3">
               <svg className="w-5 h-5 text-orange-600 dark:text-orange-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
