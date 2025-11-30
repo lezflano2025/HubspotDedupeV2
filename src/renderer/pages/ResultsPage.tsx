@@ -51,6 +51,8 @@ export function ResultsPage() {
   const [analysisResult, setAnalysisResult] = useState<DeduplicationResult | null>(null);
   const [importStatus, setImportStatus] = useState<string>('');
   const [error, setError] = useState<string>('');
+  const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
+  const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
 
   // Load groups on mount and when object type changes
   useEffect(() => {
@@ -146,6 +148,25 @@ export function ResultsPage() {
     if (score >= 0.85) return 'warning';
     return 'danger';
   };
+
+  const filteredGroups = React.useMemo(() => {
+    return groups.filter((group) => {
+      if (filterConfidence === 'all') return true;
+      if (filterConfidence === 'high') return group.similarityScore >= 0.95;
+      if (filterConfidence === 'medium') return group.similarityScore >= 0.85 && group.similarityScore < 0.95;
+      if (filterConfidence === 'low') return group.similarityScore < 0.85;
+      return true;
+    });
+  }, [filterConfidence, groups]);
+
+  const sortedGroups = React.useMemo(() => {
+    return [...filteredGroups].sort((a, b) => {
+      if (sortBy === 'confidence') {
+        return b.similarityScore - a.similarityScore;
+      }
+      return b.records.length - a.records.length;
+    });
+  }, [filteredGroups, sortBy]);
 
   if (selectedGroup) {
     return (
@@ -290,16 +311,74 @@ export function ResultsPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {groups.map((group) => {
+                <div className="mb-6 flex gap-4 items-center flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Sort by:</label>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as 'confidence' | 'recordCount')}
+                      className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="confidence">Highest Confidence First</option>
+                      <option value="recordCount">Most Records First</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Filter:</label>
+                    <div className="flex gap-2">
+                      {(['all', 'high', 'medium', 'low'] as const).map((level) => (
+                        <button
+                          key={level}
+                          onClick={() => setFilterConfidence(level)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                            filterConfidence === level
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          }`}
+                        >
+                          {level === 'all'
+                            ? 'All Groups'
+                            : `${level.charAt(0).toUpperCase() + level.slice(1)} Confidence`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="ml-auto text-sm text-gray-600 dark:text-gray-400">
+                    Showing {filteredGroups.length} of {groups.length} groups
+                  </div>
+                </div>
+
+                {sortedGroups.map((group) => {
                   const isContact = group.type === 'contact';
                   const similarityPercentage = Math.round(group.similarityScore * 100);
 
                   return (
                     <div
                       key={group.id}
-                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                      className={`border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-all ${
+                        group.similarityScore >= 0.95
+                          ? 'border-green-500 dark:border-green-600 shadow-md shadow-green-100 dark:shadow-green-900/20'
+                          : group.similarityScore >= 0.85
+                          ? 'border-yellow-400 dark:border-yellow-600'
+                          : 'border-gray-200 dark:border-gray-700'
+                      }`}
                       onClick={() => setSelectedGroup(group)}
                     >
+                      {group.similarityScore >= 0.95 && (
+                        <div className="mb-3 flex items-center gap-2 text-green-700 dark:text-green-400">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                              fillRule="evenodd"
+                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          <span className="text-xs font-semibold">High Priority - Review First</span>
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-3">
@@ -400,6 +479,27 @@ export function ResultsPage() {
                                 +{group.records.length - 3} more
                               </div>
                             )}
+                          </div>
+
+                          <div className="mt-3 mb-2">
+                            <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                              Why these might be duplicates:
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {group.matchedFields.slice(0, 5).map((field) => (
+                                <span
+                                  key={field}
+                                  className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
+                                >
+                                  {field.replace(/_/g, ' ')}
+                                </span>
+                              ))}
+                              {group.matchedFields.length > 5 && (
+                                <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
+                                  +{group.matchedFields.length - 5} more
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           <div className="text-sm text-gray-600 dark:text-gray-400 font-mono">
