@@ -66,18 +66,26 @@ export function ResultsPage() {
     loadGroups();
   }, [objectType]);
 
+  const loadStatusCounts = async () => {
+    try {
+      const counts = await window.api.dedupGetStatusCounts(objectType);
+      setStatusCounts(counts);
+    } catch (err) {
+      console.error('Failed to load status counts:', err);
+    }
+  };
+
   const loadGroups = async () => {
     setIsLoading(true);
     setError('');
 
     try {
-      // Execute both fetches concurrently
+      // RESOLUTION: Use concurrent fetching from 'main' AND normalization from 'codex'
       const [fetchedGroups, counts] = await Promise.all([
         window.api.dedupGetGroups(objectType, 'pending'),
         window.api.dedupGetStatusCounts(objectType),
       ]);
 
-      // Normalize scores for the groups
       const normalizedGroups = fetchedGroups.map((group) => ({
         ...group,
         similarityScore: normalizeSimilarityScore(group.similarityScore),
@@ -149,10 +157,7 @@ export function ResultsPage() {
       if (result.success) {
         // Remove the merged group from the list
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
-        // Refresh counts
-        const counts = await window.api.dedupGetStatusCounts(objectType);
-        setStatusCounts(counts);
-        
+        loadStatusCounts();
         setSelectedGroup(null);
         alert(`Successfully merged ${result.mergedIds.length} records!`);
       } else {
@@ -248,7 +253,6 @@ export function ResultsPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Duplicate Detection</h1>
           <p className="text-gray-600 dark:text-gray-400">
@@ -256,7 +260,6 @@ export function ResultsPage() {
           </p>
         </div>
 
-        {/* Controls */}
         <Card className="mb-6">
           <CardContent>
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -336,17 +339,14 @@ export function ResultsPage() {
           </CardContent>
         </Card>
 
-        {/* Data Viewer */}
         <DataViewer objectType={objectType} />
 
-        {/* Error Display */}
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
           </div>
         )}
 
-        {/* Groups List */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -421,6 +421,7 @@ export function ResultsPage() {
 
                 {sortedGroups.map((group) => {
                   const isContact = group.type === 'contact';
+                  // RESOLUTION: Use formatSimilarity for consistent display
                   const similarityPercentage = formatSimilarity(group.similarityScore);
                   const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
 
