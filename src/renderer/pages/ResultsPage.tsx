@@ -53,6 +53,16 @@ export function ResultsPage() {
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
   const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim().toLowerCase());
+    }, 250);
+
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
 
   // Load groups on mount and when object type changes
   useEffect(() => {
@@ -151,13 +161,33 @@ export function ResultsPage() {
 
   const filteredGroups = React.useMemo(() => {
     return groups.filter((group) => {
-      if (filterConfidence === 'all') return true;
-      if (filterConfidence === 'high') return group.similarityScore >= 0.95;
-      if (filterConfidence === 'medium') return group.similarityScore >= 0.85 && group.similarityScore < 0.95;
-      if (filterConfidence === 'low') return group.similarityScore < 0.85;
-      return true;
+      if (filterConfidence !== 'all') {
+        if (filterConfidence === 'high' && group.similarityScore < 0.95) return false;
+        if (filterConfidence === 'medium' && (group.similarityScore < 0.85 || group.similarityScore >= 0.95))
+          return false;
+        if (filterConfidence === 'low' && group.similarityScore >= 0.85) return false;
+      }
+
+      if (!debouncedSearch) return true;
+
+      return group.records.some((record) => {
+        const name = `${'first_name' in record ? record.first_name || '' : ''} ${
+          'last_name' in record ? record.last_name || '' : ''
+        }`;
+        const valuesToSearch = [
+          name.trim(),
+          'email' in record ? (record.email as string | undefined) : undefined,
+          'company' in record ? (record.company as string | undefined) : undefined,
+          'name' in record ? (record.name as string | undefined) : undefined,
+          'domain' in record ? (record.domain as string | undefined) : undefined,
+        ]
+          .filter(Boolean)
+          .map((value) => (value as string).toLowerCase());
+
+        return valuesToSearch.some((value) => value.includes(debouncedSearch));
+      });
     });
-  }, [filterConfidence, groups]);
+  }, [debouncedSearch, filterConfidence, groups]);
 
   const sortedGroups = React.useMemo(() => {
     return [...filteredGroups].sort((a, b) => {
@@ -345,16 +375,32 @@ export function ResultsPage() {
                     </div>
                   </div>
 
-                  <div className="ml-auto text-sm text-gray-600 dark:text-gray-400">
-                    Showing {filteredGroups.length} of {groups.length} groups
+                  <div className="ml-auto flex flex-wrap items-center gap-3">
+                    <div>
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Search by name, email, or company"
+                        className="w-64 max-w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      Showing {filteredGroups.length} of {groups.length} groups
+                    </div>
                   </div>
                 </div>
 
-                {sortedGroups.map((group) => {
-                  const isContact = group.type === 'contact';
-                  const similarityPercentage = Math.round(group.similarityScore * 100);
+                  {filteredGroups.length === 0 ? (
+                    <div className="text-center py-10 text-gray-500 dark:text-gray-400">
+                      <p className="text-lg">No groups match this search</p>
+                    </div>
+                  ) : (
+                    sortedGroups.map((group) => {
+                      const isContact = group.type === 'contact';
+                      const similarityPercentage = Math.round(group.similarityScore * 100);
 
-                  return (
+                      return (
                     <div
                       key={group.id}
                       className={`border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-all ${
@@ -518,8 +564,9 @@ export function ResultsPage() {
                         </Button>
                       </div>
                     </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             )}
           </CardContent>
