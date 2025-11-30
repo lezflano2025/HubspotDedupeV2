@@ -5,6 +5,7 @@ import { authenticateHubSpot, getConnectionStatus, disconnectHubSpot } from './h
 import { runContactDeduplication, runCompanyDeduplication } from './dedup';
 import { executeMerge } from './hubspot/merge';
 import { importContacts, importCompanies } from './hubspot/import';
+import { normalizeSimilarity } from '../shared/similarity';
 
 /**
  * IPC handlers for communication between Main and Renderer processes
@@ -175,13 +176,27 @@ ipcMain.handle(IPC_CHANNELS.DEDUP_GET_GROUPS, async (_event, type: 'contact' | '
         console.error('Failed to parse field scores:', e);
       }
 
+      const rawSimilarity = matches[0]?.match_score || 0;
+      const similarityScore = normalizeSimilarity(rawSimilarity);
+
+      // Normalize field score values to 0-1 range
+      const normalizedFieldScores = fieldScores.map((fs) => ({
+        field: fs.field,
+        score: normalizeSimilarity(fs.score),
+      }));
+
       return {
         id: group.group_id,
         type: group.object_type,
         records,
-        similarityScore: matches[0]?.match_score || 0,
-        matchedFields: matches[0]?.matched_fields ? (typeof JSON.parse(matches[0].matched_fields) === 'object' && !Array.isArray(JSON.parse(matches[0].matched_fields)) ? JSON.parse(matches[0].matched_fields).fields || [] : JSON.parse(matches[0].matched_fields)) : [],
-        fieldScores,
+        similarityScore,
+        matchedFields: matches[0]?.matched_fields
+          ? typeof JSON.parse(matches[0].matched_fields) === 'object' && !Array.isArray(JSON.parse(matches[0].matched_fields))
+            ? JSON.parse(matches[0].matched_fields).fields || []
+            : JSON.parse(matches[0].matched_fields)
+          : [],
+        fieldScores: normalizedFieldScores,
+        status: 'unreviewed',
       };
     });
 
