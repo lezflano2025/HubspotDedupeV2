@@ -4,6 +4,7 @@ import { Badge } from './Badge';
 import { Button } from './Button';
 import { clsx } from 'clsx';
 import type { FieldSimilarity } from '../../shared/types';
+import { SYSTEM_PROPERTY_KEYS } from '../../shared/systemProperties';
 
 interface Record {
   hs_id: string;
@@ -27,14 +28,12 @@ const CONTACT_KEY_FIELDS = ['email', 'first_name', 'last_name', 'company', 'job_
 const COMPANY_KEY_FIELDS = ['name', 'domain', 'phone', 'city', 'state'];
 
 // System fields to exclude
-const EXCLUDED_FIELDS = new Set([
+const EXCLUDED_FIELDS = new Set<string>([
+  ...Array.from(SYSTEM_PROPERTY_KEYS),
   'id',
   'hs_id',
-  'hs_object_id',
   'created_at',
-  'createdate',
   'updated_at',
-  'lastmodifieddate',
   'imported_at',
   'properties',
   'retry_count',

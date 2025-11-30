@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from './Card';
 import { Button } from './Button';
 import type { ContactData, CompanyData } from '../../shared/types';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import { SYSTEM_PROPERTY_KEYS } from '../../shared/systemProperties';
 
 interface DataViewerProps {
   objectType: 'contact' | 'company';
@@ -15,6 +16,27 @@ export function DataViewer({ objectType }: DataViewerProps) {
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<ContactData | CompanyData | null>(null);
+  const [showSystemProperties, setShowSystemProperties] = useState(false);
+
+  const systemPropertyKeySet = useMemo(
+    () => new Set(Array.from(SYSTEM_PROPERTY_KEYS).map((key) => key.toLowerCase())),
+    []
+  );
+
+  const storageKey = useMemo(() => `showSystemProperties:${objectType}`, [objectType]);
+
+  useEffect(() => {
+    const storedPreference = window.localStorage.getItem(storageKey);
+    setShowSystemProperties(storedPreference === 'true');
+  }, [storageKey]);
+
+  const toggleSystemProperties = useCallback(() => {
+    setShowSystemProperties((prev) => {
+      const next = !prev;
+      window.localStorage.setItem(storageKey, String(next));
+      return next;
+    });
+  }, [storageKey]);
 
   // Load count on mount and when objectType changes
   useEffect(() => {
@@ -70,6 +92,54 @@ export function DataViewer({ objectType }: DataViewerProps) {
     }
   };
 
+  const renderPropertiesSection = (properties: Record<string, unknown>) => {
+    if (Object.keys(properties).length === 0) return null;
+
+    const allEntries = Object.entries(properties);
+    const visibleEntries = allEntries.filter(
+      ([key]) => showSystemProperties || !systemPropertyKeySet.has(key.toLowerCase())
+    );
+    const hiddenSystemCount = allEntries.length - visibleEntries.length;
+
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-sm font-medium text-gray-600 dark:text-gray-400">
+            All Properties ({allEntries.length})
+          </label>
+          {hiddenSystemCount > 0 && (
+            <Button variant="secondary" size="sm" onClick={toggleSystemProperties}>
+              {showSystemProperties
+                ? 'Hide system properties'
+                : `Show system properties (${hiddenSystemCount})`}
+            </Button>
+          )}
+        </div>
+        {!showSystemProperties && hiddenSystemCount > 0 && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            System properties are hidden from view. Toggle to reveal them.
+          </p>
+        )}
+        <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 max-h-64 overflow-y-auto">
+          {visibleEntries.length === 0 ? (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              No non-system properties to display.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 text-xs">
+              {visibleEntries.map(([key, value]) => (
+                <div key={key} className="flex gap-2">
+                  <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[150px]">{key}:</span>
+                  <span className="text-gray-600 dark:text-gray-400 break-all">{String(value)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderContactDetails = (contact: ContactData) => {
     const properties = parseProperties(contact.properties);
 
@@ -112,27 +182,7 @@ export function DataViewer({ objectType }: DataViewerProps) {
           </div>
         </div>
 
-        {Object.keys(properties).length > 0 && (
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2 block">
-              All Properties ({Object.keys(properties).length})
-            </label>
-            <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 max-h-64 overflow-y-auto">
-              <div className="grid grid-cols-1 gap-2 text-xs">
-                {Object.entries(properties).map(([key, value]) => (
-                  <div key={key} className="flex gap-2">
-                    <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[150px]">
-                      {key}:
-                    </span>
-                    <span className="text-gray-600 dark:text-gray-400 break-all">
-                      {String(value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+        {renderPropertiesSection(properties)}
       </div>
     );
   };
@@ -183,27 +233,7 @@ export function DataViewer({ objectType }: DataViewerProps) {
           </div>
         </div>
 
-        {Object.keys(properties).length > 0 && (
-          <div>
-            <label className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2 block">
-              All Properties ({Object.keys(properties).length})
-            </label>
-            <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 max-h-64 overflow-y-auto">
-              <div className="grid grid-cols-1 gap-2 text-xs">
-                {Object.entries(properties).map(([key, value]) => (
-                  <div key={key} className="flex gap-2">
-                    <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[150px]">
-                      {key}:
-                    </span>
-                    <span className="text-gray-600 dark:text-gray-400 break-all">
-                      {String(value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+        {renderPropertiesSection(properties)}
       </div>
     );
   };
