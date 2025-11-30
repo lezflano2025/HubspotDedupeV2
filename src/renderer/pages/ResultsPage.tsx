@@ -4,7 +4,7 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
-import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts } from '../../shared/types';
+import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts, FieldSimilarity } from '../../shared/types';
 import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
@@ -61,6 +61,51 @@ export function ResultsPage() {
     total: 0,
   });
 
+  const formatFieldName = (field: string) => field.replace(/_/g, ' ');
+
+  // Logic from Codex branch: Calculate top contributing fields
+  const getTopContributingFields = (
+    fieldScores?: FieldSimilarity[],
+    matchedFields: string[] = []
+  ): FieldSimilarity[] => {
+    const scoredFields =
+      fieldScores
+        ?.filter((fs) => typeof fs.score === 'number' && fs.score >= 70)
+        .sort((a, b) => b.score - a.score) || [];
+
+    if (scoredFields.length > 0) {
+      return scoredFields;
+    }
+
+    if (matchedFields.length > 0) {
+      return matchedFields.map((field) => ({ field, score: 100 }));
+    }
+
+    return [];
+  };
+
+  // Logic from Codex branch: Generate human-readable reason
+  const buildDuplicateReasonSentence = (fields: FieldSimilarity[]): string => {
+    if (!fields.length) {
+      return 'These records share similarities across multiple fields.';
+    }
+
+    const highlighted = fields
+      .slice(0, 3)
+      .map((f) => `${formatFieldName(f.field)} (${Math.round(f.score)}%)`);
+
+    if (highlighted.length === 1) {
+      return `Likely duplicates because ${highlighted[0]} is very similar.`;
+    }
+
+    if (highlighted.length === 2) {
+      return `Likely duplicates because ${highlighted[0]} and ${highlighted[1]} closely match.`;
+    }
+
+    const last = highlighted.pop();
+    return `Likely duplicates because ${highlighted.join(', ')} and ${last} all show strong matches.`;
+  };
+
   // Load groups on mount and when object type changes
   useEffect(() => {
     loadGroups();
@@ -80,12 +125,13 @@ export function ResultsPage() {
     setError('');
 
     try {
-      // RESOLUTION: Use concurrent fetching from 'main' AND normalization from 'codex'
+      // Main branch: Concurrent loading
       const [fetchedGroups, counts] = await Promise.all([
         window.api.dedupGetGroups(objectType, 'pending'),
         window.api.dedupGetStatusCounts(objectType),
       ]);
 
+      // Codex branch: Score normalization
       const normalizedGroups = fetchedGroups.map((group) => ({
         ...group,
         similarityScore: normalizeSimilarityScore(group.similarityScore),
@@ -421,8 +467,13 @@ export function ResultsPage() {
 
                 {sortedGroups.map((group) => {
                   const isContact = group.type === 'contact';
-                  // RESOLUTION: Use formatSimilarity for consistent display
+                  // Main branch: Format similarity
                   const similarityPercentage = formatSimilarity(group.similarityScore);
+                  // Codex branch: Get top contributing fields
+                  const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
+                  // Codex branch: Generate explanation sentence
+                  const duplicateReason = buildDuplicateReasonSentence(topFields);
+                  // Main branch: Styles
                   const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
 
                   return (
@@ -556,18 +607,21 @@ export function ResultsPage() {
                         <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                           Why these might be duplicates:
                         </div>
+                        {/* Render the human-readable reason */}
+                        <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
+                        
                         <div className="flex flex-wrap gap-1.5">
-                          {group.matchedFields.slice(0, 5).map((field) => (
+                          {topFields.slice(0, 5).map((field) => (
                             <span
-                              key={field}
+                              key={field.field}
                               className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
                             >
-                              {field.replace(/_/g, ' ')}
+                              {formatFieldName(field.field)} • {Math.round(field.score)}%
                             </span>
                           ))}
-                          {group.matchedFields.length > 5 && (
+                          {topFields.length > 5 && (
                             <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
-                              +{group.matchedFields.length - 5} more
+                              +{topFields.length - 5} more
                             </span>
                           )}
                         </div>
