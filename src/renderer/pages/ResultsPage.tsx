@@ -60,6 +60,18 @@ export function ResultsPage() {
     merged: 0,
     total: 0,
   });
+  
+  // Search state from Codex branch
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim().toLowerCase());
+    }, 250);
+
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
 
   const formatFieldName = (field: string) => field.replace(/_/g, ' ');
 
@@ -249,13 +261,36 @@ export function ResultsPage() {
 
   const filteredGroups = React.useMemo(() => {
     return groups.filter((group) => {
-      if (filterConfidence === 'all') return true;
-      if (filterConfidence === 'high') return group.similarityScore >= 0.95;
-      if (filterConfidence === 'medium') return group.similarityScore >= 0.85 && group.similarityScore < 0.95;
-      if (filterConfidence === 'low') return group.similarityScore < 0.85;
-      return true;
+      // 1. Confidence Filter
+      if (filterConfidence !== 'all') {
+        if (filterConfidence === 'high' && group.similarityScore < 0.95) return false;
+        if (filterConfidence === 'medium' && (group.similarityScore < 0.85 || group.similarityScore >= 0.95))
+          return false;
+        if (filterConfidence === 'low' && group.similarityScore >= 0.85) return false;
+      }
+
+      // 2. Search Filter (from Codex branch)
+      if (!debouncedSearch) return true;
+
+      return group.records.some((record) => {
+        // Safe access to properties that might not exist on all record types
+        const r = record as any;
+        const name = `${r.first_name || ''} ${r.last_name || ''}`;
+        
+        const valuesToSearch = [
+          name.trim(),
+          r.email,
+          r.company,
+          r.name,
+          r.domain,
+        ]
+          .filter(Boolean)
+          .map((value) => String(value).toLowerCase());
+
+        return valuesToSearch.some((value) => value.includes(debouncedSearch));
+      });
     });
-  }, [filterConfidence, groups]);
+  }, [debouncedSearch, filterConfidence, groups]);
 
   const sortedGroups = React.useMemo(() => {
     return [...filteredGroups].sort((a, b) => {
@@ -460,179 +495,196 @@ export function ResultsPage() {
                     </div>
                   </div>
 
-                  <div className="ml-auto text-sm text-gray-600 dark:text-gray-400">
-                    Showing {filteredGroups.length} of {groups.length} groups
+                  <div className="ml-auto flex flex-wrap items-center gap-3">
+                    <div>
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Search by name, email, or company"
+                        className="w-64 max-w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      Showing {filteredGroups.length} of {groups.length} groups
+                    </div>
                   </div>
                 </div>
 
-                {sortedGroups.map((group) => {
-                  const isContact = group.type === 'contact';
-                  // Main branch: Format similarity
-                  const similarityPercentage = formatSimilarity(group.similarityScore);
-                  // Codex branch: Get top contributing fields
-                  const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
-                  // Codex branch: Generate explanation sentence
-                  const duplicateReason = buildDuplicateReasonSentence(topFields);
-                  // Main branch: Styles
-                  const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
+                {filteredGroups.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500 dark:text-gray-400">
+                    <p className="text-lg">No groups match this search</p>
+                  </div>
+                ) : (
+                  sortedGroups.map((group) => {
+                    const isContact = group.type === 'contact';
+                    // Main branch: Format similarity
+                    const similarityPercentage = formatSimilarity(group.similarityScore);
+                    // Codex branch: Get top contributing fields
+                    const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
+                    // Codex branch: Generate explanation sentence
+                    const duplicateReason = buildDuplicateReasonSentence(topFields);
+                    // Main branch: Styles
+                    const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
 
-                  return (
-                    <div
-                      key={group.id}
-                      className={`flex flex-col gap-3 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm bg-white dark:bg-gray-800 hover:shadow-md transition-all cursor-pointer ${borderClass}`}
-                      onClick={() => setSelectedGroup(group)}
-                    >
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${priorityClass}`}>
-                              {priorityLabel}
-                            </span>
-                            <Badge variant="default">Group ID: {group.id}</Badge>
-                          </div>
-                          <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                            {group.records.length} Duplicate Records · {similarityPercentage}% Match
-                          </div>
-                          <div className="flex gap-2 items-center flex-wrap">
-                            <TooltipBadge
-                              variant="info"
-                              tooltip="Overall similarity based on matching fields. Higher percentages indicate more identical data between these records."
-                            >
-                              {similarityPercentage}% Match
-                            </TooltipBadge>
-
-                            <TooltipBadge
-                              variant={getConfidenceBadgeVariant(group.similarityScore)}
-                              tooltip={
-                                group.similarityScore >= 0.95
-                                  ? 'High confidence: 95%+ match. These records are very likely duplicates.'
-                                  : group.similarityScore >= 0.85
-                                  ? 'Medium confidence: 85-94% match. Review carefully before merging.'
-                                  : 'Low confidence: <85% match. May be false positives - verify before merging.'
-                              }
-                            >
-                              {group.similarityScore >= 0.95
-                                ? 'High'
-                                : group.similarityScore >= 0.85
-                                ? 'Medium'
-                                : 'Low'}{' '}
-                              Confidence
-                            </TooltipBadge>
-
-                            <Badge variant="default">{group.records.length} Records</Badge>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <Badge variant={getConfidenceBadgeVariant(group.similarityScore)}>{similarityPercentage}% Confidence</Badge>
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedGroup(group);
-                            }}
-                          >
-                            Review →
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Show key fields for each record */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
-                        {group.records.slice(0, 3).map((record, idx) => (
-                          <div
-                            key={idx}
-                            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2"
-                          >
-                            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
-                              Record {idx + 1}
+                    return (
+                      <div
+                        key={group.id}
+                        className={`flex flex-col gap-3 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm bg-white dark:bg-gray-800 hover:shadow-md transition-all cursor-pointer ${borderClass}`}
+                        onClick={() => setSelectedGroup(group)}
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${priorityClass}`}>
+                                {priorityLabel}
+                              </span>
+                              <Badge variant="default">Group ID: {group.id}</Badge>
                             </div>
-                            {isContact ? (
-                              <div className="space-y-1 text-xs">
-                                {record.first_name || record.last_name ? (
-                                  <div className="font-medium text-gray-900 dark:text-white truncate">
-                                    {record.first_name} {record.last_name}
-                                  </div>
-                                ) : null}
-                                {record.email && (
-                                  <div className="text-gray-600 dark:text-gray-400 truncate">
-                                    📧 {record.email as string}
-                                  </div>
-                                )}
-                                {record.company && (
-                                  <div className="text-gray-600 dark:text-gray-400 truncate">
-                                    🏢 {record.company as string}
-                                  </div>
-                                )}
-                                {record.job_title && (
-                                  <div className="text-gray-600 dark:text-gray-400 truncate">
-                                    💼 {record.job_title as string}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="space-y-1 text-xs">
-                                {record.name && (
-                                  <div className="font-medium text-gray-900 dark:text-white truncate">
-                                    {record.name as string}
-                                  </div>
-                                )}
-                                {record.domain && (
-                                  <div className="text-gray-600 dark:text-gray-400 truncate">
-                                    🌐 {record.domain as string}
-                                  </div>
-                                )}
-                                {record.phone && (
-                                  <div className="text-gray-600 dark:text-gray-400 truncate">
-                                    📱 {record.phone as string}
-                                  </div>
-                                )}
-                                {record.city && record.state && (
-                                  <div className="text-gray-600 dark:text-gray-400 truncate">
-                                    📍 {record.city as string}, {record.state as string}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {group.records.length > 3 && (
-                          <div className="flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
-                            +{group.records.length - 3} more
-                          </div>
-                        )}
-                      </div>
+                            <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                              {group.records.length} Duplicate Records · {similarityPercentage}% Match
+                            </div>
+                            <div className="flex gap-2 items-center flex-wrap">
+                              <TooltipBadge
+                                variant="info"
+                                tooltip="Overall similarity based on matching fields. Higher percentages indicate more identical data between these records."
+                              >
+                                {similarityPercentage}% Match
+                              </TooltipBadge>
 
-                      <div className="mt-3 mb-2">
-                        <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          Why these might be duplicates:
-                        </div>
-                        {/* Render the human-readable reason */}
-                        <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
-                        
-                        <div className="flex flex-wrap gap-1.5">
-                          {topFields.slice(0, 5).map((field) => (
-                            <span
-                              key={field.field}
-                              className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
+                              <TooltipBadge
+                                variant={getConfidenceBadgeVariant(group.similarityScore)}
+                                tooltip={
+                                  group.similarityScore >= 0.95
+                                    ? 'High confidence: 95%+ match. These records are very likely duplicates.'
+                                    : group.similarityScore >= 0.85
+                                    ? 'Medium confidence: 85-94% match. Review carefully before merging.'
+                                    : 'Low confidence: <85% match. May be false positives - verify before merging.'
+                                }
+                              >
+                                {group.similarityScore >= 0.95
+                                  ? 'High'
+                                  : group.similarityScore >= 0.85
+                                  ? 'Medium'
+                                  : 'Low'}{' '}
+                                Confidence
+                              </TooltipBadge>
+
+                              <Badge variant="default">{group.records.length} Records</Badge>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <Badge variant={getConfidenceBadgeVariant(group.similarityScore)}>{similarityPercentage}% Confidence</Badge>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedGroup(group);
+                              }}
                             >
-                              {formatFieldName(field.field)} • {Math.round(field.score)}%
-                            </span>
+                              Review →
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Show key fields for each record */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+                          {group.records.slice(0, 3).map((record, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2"
+                            >
+                              <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+                                Record {idx + 1}
+                              </div>
+                              {isContact ? (
+                                <div className="space-y-1 text-xs">
+                                  {record.first_name || record.last_name ? (
+                                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                                      {record.first_name} {record.last_name}
+                                    </div>
+                                  ) : null}
+                                  {record.email && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      📧 {record.email as string}
+                                    </div>
+                                  )}
+                                  {record.company && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      🏢 {record.company as string}
+                                    </div>
+                                  )}
+                                  {record.job_title && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      💼 {record.job_title as string}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="space-y-1 text-xs">
+                                  {record.name && (
+                                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                                      {record.name as string}
+                                    </div>
+                                  )}
+                                  {record.domain && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      🌐 {record.domain as string}
+                                    </div>
+                                  )}
+                                  {record.phone && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      📱 {record.phone as string}
+                                    </div>
+                                  )}
+                                  {record.city && record.state && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      📍 {record.city as string}, {record.state as string}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           ))}
-                          {topFields.length > 5 && (
-                            <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
-                              +{topFields.length - 5} more
-                            </span>
+                          {group.records.length > 3 && (
+                            <div className="flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
+                              +{group.records.length - 3} more
+                            </div>
                           )}
                         </div>
-                      </div>
 
-                      <div className="text-sm text-gray-600 dark:text-gray-400 font-mono">
-                        Group ID: {group.id}
+                        <div className="mt-3 mb-2">
+                          <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                            Why these might be duplicates:
+                          </div>
+                          {/* Render the human-readable reason */}
+                          <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
+                          
+                          <div className="flex flex-wrap gap-1.5">
+                            {topFields.slice(0, 5).map((field) => (
+                              <span
+                                key={field.field}
+                                className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
+                              >
+                                {formatFieldName(field.field)} • {Math.round(field.score)}%
+                              </span>
+                            ))}
+                            {topFields.length > 5 && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
+                                +{topFields.length - 5} more
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-sm text-gray-600 dark:text-gray-400 font-mono">
+                          Group ID: {group.id}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             )}
           </CardContent>
