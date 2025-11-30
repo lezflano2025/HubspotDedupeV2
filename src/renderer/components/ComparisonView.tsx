@@ -60,16 +60,38 @@ function FieldComparison({
       : 'danger'
     : 'info';
 
-  const uniqueValues = new Set(values.filter((v) => v !== null && v !== undefined));
-  const allSame = uniqueValues.size === 1 && !uniqueValues.has(null) && !uniqueValues.has(undefined);
+  const displayValues = values.map((value) => (value === null || value === undefined ? '' : value.toString()));
+  const normalizedValues = displayValues.map((value) => value.trim());
+  const uniqueNormalizedValues = new Set(normalizedValues);
+  const hasDifferences = uniqueNormalizedValues.size > 1;
+  const allSame = !hasDifferences;
 
   return (
-    <div className="border-b border-gray-200 dark:border-gray-700 py-3">
+    <div
+      className={clsx(
+        'border-b border-gray-200 dark:border-gray-700 py-3 rounded-md transition-colors',
+        {
+          'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-700': hasDifferences,
+        },
+      )}
+    >
       <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 capitalize">
-            {label.replace(/_/g, ' ')}
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 capitalize">
+              {label.replace(/_/g, ' ')}
+            </span>
+            {hasDifferences && (
+              <div className="group relative text-orange-600 dark:text-orange-400" aria-label="Values differ between records">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M7 4a1 1 0 011 1v2h2a1 1 0 010 2H8v2a1 1 0 11-2 0V9H4a1 1 0 010-2h2V5a1 1 0 011-1zm6 6a1 1 0 10-2 0v2h-2a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2v-2z" />
+                </svg>
+                <div className="invisible group-hover:visible absolute z-10 px-3 py-2 text-xs font-normal text-white bg-gray-900 rounded-lg shadow-lg bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap">
+                  Values differ between records
+                </div>
+              </div>
+            )}
+          </div>
           {similarityScore !== undefined && (
             <div className="group relative">
               <Badge variant={badgeVariant}>{Math.round(similarityScore)}% match</Badge>
@@ -86,8 +108,9 @@ function FieldComparison({
 
         <div className="text-xs text-gray-500 dark:text-gray-400">
           {(() => {
-            const uniqueNonEmptyValues = new Set(values.filter((v) => v !== null && v !== undefined && v !== ''));
-            if (uniqueNonEmptyValues.size === 1) {
+            const uniqueNonEmptyValues = new Set(normalizedValues.filter((v) => v !== ''));
+            const hasMissingValues = normalizedValues.some((v) => v === '');
+            if (!hasDifferences && uniqueNonEmptyValues.size === 1) {
               return (
                 <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -101,7 +124,7 @@ function FieldComparison({
                 </span>
               );
             }
-            if (values.some((v) => v === null || v === undefined || v === '')) {
+            if (hasMissingValues) {
               return <span className="text-yellow-600 dark:text-yellow-400">Missing data</span>;
             }
             return <span className="text-orange-600 dark:text-orange-400">Different values</span>;
@@ -111,9 +134,10 @@ function FieldComparison({
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {values.map((value, idx) => {
           const isGolden = goldenIndex === idx;
-          const val = value?.toString() || '';
-          const isEmpty = !val;
-          const isDifferent = !allSame && !isEmpty;
+          const val = displayValues[idx];
+          const normalizedValue = normalizedValues[idx];
+          const isEmpty = !normalizedValue;
+          const isDifferent = hasDifferences && !isEmpty;
 
           return (
             <div
