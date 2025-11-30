@@ -4,7 +4,7 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
-import type { DuplicateGroup, DeduplicationResult } from '../../shared/types';
+import type { DuplicateGroup, DeduplicationResult, FieldSimilarity } from '../../shared/types';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
 
@@ -53,6 +53,49 @@ export function ResultsPage() {
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
   const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
+
+  const formatFieldName = (field: string) => field.replace(/_/g, ' ');
+
+  const getTopContributingFields = (
+    fieldScores?: FieldSimilarity[],
+    matchedFields: string[] = []
+  ): FieldSimilarity[] => {
+    const scoredFields =
+      fieldScores
+        ?.filter((fs) => typeof fs.score === 'number' && fs.score >= 70)
+        .sort((a, b) => b.score - a.score) || [];
+
+    if (scoredFields.length > 0) {
+      return scoredFields;
+    }
+
+    if (matchedFields.length > 0) {
+      return matchedFields.map((field) => ({ field, score: 100 }));
+    }
+
+    return [];
+  };
+
+  const buildDuplicateReasonSentence = (fields: FieldSimilarity[]): string => {
+    if (!fields.length) {
+      return 'These records share similarities across multiple fields.';
+    }
+
+    const highlighted = fields
+      .slice(0, 3)
+      .map((f) => `${formatFieldName(f.field)} (${Math.round(f.score)}%)`);
+
+    if (highlighted.length === 1) {
+      return `Likely duplicates because ${highlighted[0]} is very similar.`;
+    }
+
+    if (highlighted.length === 2) {
+      return `Likely duplicates because ${highlighted[0]} and ${highlighted[1]} closely match.`;
+    }
+
+    const last = highlighted.pop();
+    return `Likely duplicates because ${highlighted.join(', ')} and ${last} all show strong matches.`;
+  };
 
   // Load groups on mount and when object type changes
   useEffect(() => {
@@ -353,6 +396,8 @@ export function ResultsPage() {
                 {sortedGroups.map((group) => {
                   const isContact = group.type === 'contact';
                   const similarityPercentage = Math.round(group.similarityScore * 100);
+                  const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
+                  const duplicateReason = buildDuplicateReasonSentence(topFields);
 
                   return (
                     <div
@@ -485,18 +530,19 @@ export function ResultsPage() {
                             <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                               Why these might be duplicates:
                             </div>
+                            <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
                             <div className="flex flex-wrap gap-1.5">
-                              {group.matchedFields.slice(0, 5).map((field) => (
+                              {topFields.slice(0, 5).map((field) => (
                                 <span
-                                  key={field}
+                                  key={field.field}
                                   className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
                                 >
-                                  {field.replace(/_/g, ' ')}
+                                  {formatFieldName(field.field)} • {Math.round(field.score)}%
                                 </span>
                               ))}
-                              {group.matchedFields.length > 5 && (
+                              {topFields.length > 5 && (
                                 <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
-                                  +{group.matchedFields.length - 5} more
+                                  +{topFields.length - 5} more
                                 </span>
                               )}
                             </div>
