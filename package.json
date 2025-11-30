@@ -12,7 +12,7 @@
     "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
-    "build:main": "tsc -p tsconfig.main.json && cp src/main/package.json dist/main/package.json && cp src/shared/package.json dist/shared/package.json",
+    "build:main": "tsc -p tsconfig.main.json && shx cp src/main/package.json dist/main/package.json && shx cp src/shared/package.json dist/shared/package.json",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "compile": "npm run build && electron-builder",
