@@ -59,6 +59,14 @@ const api: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_MERGE, groupId, primaryId);
   },
 
+  dedupUpdateGroupStatus: async (
+    groupId: string,
+    status: 'pending' | 'reviewed' | 'merged' | string,
+    goldenHsId?: string
+  ) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_UPDATE_STATUS, groupId, status, goldenHsId);
+  },
+
   // Data retrieval operations
   getContacts: async (limit?: number, offset?: number) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_CONTACTS, limit, offset);

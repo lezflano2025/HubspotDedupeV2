@@ -53,6 +53,7 @@ export function ResultsPage() {
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
   const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
+  const [statusFilter, setStatusFilter] = React.useState<'all' | 'pending'>('pending');
 
   // Load groups on mount and when object type changes
   useEffect(() => {
@@ -64,7 +65,7 @@ export function ResultsPage() {
     setError('');
 
     try {
-      const fetchedGroups = await window.api.dedupGetGroups(objectType, 'pending');
+      const fetchedGroups = await window.api.dedupGetGroups(objectType);
       setGroups(fetchedGroups);
     } catch (err) {
       console.error('Failed to load groups:', err);
@@ -120,6 +121,27 @@ export function ResultsPage() {
     }
   };
 
+  const updateGroupStatus = async (
+    groupId: string,
+    status: 'pending' | 'reviewed' | 'merged' | string,
+    goldenHsId?: string
+  ) => {
+    try {
+      const updated = await window.api.dedupUpdateGroupStatus(groupId, status, goldenHsId);
+
+      // Optimistically update UI even if API returns null
+      setGroups((prev) => prev.map((g) => (g.id === groupId ? { ...g, status } : g)));
+
+      setSelectedGroup((prev) => (prev && prev.id === groupId ? { ...prev, status } : prev));
+
+      return updated;
+    } catch (err) {
+      console.error('Failed to update group status:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update group status');
+      return null;
+    }
+  };
+
   const handleMerge = async (groupId: string, primaryId: string) => {
     setIsMerging(true);
     setError('');
@@ -128,8 +150,7 @@ export function ResultsPage() {
       const result = await window.api.dedupMerge(groupId, primaryId);
 
       if (result.success) {
-        // Remove the merged group from the list
-        setGroups((prev) => prev.filter((g) => g.id !== groupId));
+        await updateGroupStatus(groupId, 'merged', primaryId);
         setSelectedGroup(null);
         alert(`Successfully merged ${result.mergedIds.length} records!`);
       } else {
@@ -151,13 +172,21 @@ export function ResultsPage() {
 
   const filteredGroups = React.useMemo(() => {
     return groups.filter((group) => {
-      if (filterConfidence === 'all') return true;
-      if (filterConfidence === 'high') return group.similarityScore >= 0.95;
-      if (filterConfidence === 'medium') return group.similarityScore >= 0.85 && group.similarityScore < 0.95;
-      if (filterConfidence === 'low') return group.similarityScore < 0.85;
-      return true;
+      const normalizedStatus = group.status || 'pending';
+      const statusMatches = statusFilter === 'all' ? true : normalizedStatus === 'pending';
+
+      const confidenceMatches =
+        filterConfidence === 'all'
+          ? true
+          : filterConfidence === 'high'
+          ? group.similarityScore >= 0.95
+          : filterConfidence === 'medium'
+          ? group.similarityScore >= 0.85 && group.similarityScore < 0.95
+          : group.similarityScore < 0.85;
+
+      return statusMatches && confidenceMatches;
     });
-  }, [filterConfidence, groups]);
+  }, [filterConfidence, groups, statusFilter]);
 
   const sortedGroups = React.useMemo(() => {
     return [...filteredGroups].sort((a, b) => {
@@ -167,6 +196,27 @@ export function ResultsPage() {
       return b.records.length - a.records.length;
     });
   }, [filteredGroups, sortBy]);
+
+  const handleSelectGroup = async (group: DuplicateGroup) => {
+    setSelectedGroup(group);
+
+    if ((group.status || 'pending') === 'pending') {
+      await updateGroupStatus(group.id, 'reviewed', group.goldenRecordId);
+    }
+  };
+
+  const getStatusBadge = (status?: string) => {
+    const normalizedStatus = status || 'pending';
+
+    switch (normalizedStatus) {
+      case 'merged':
+        return <Badge variant="success">Merged</Badge>;
+      case 'reviewed':
+        return <Badge variant="warning">Reviewed</Badge>;
+      default:
+        return <Badge variant="default">Unreviewed</Badge>;
+    }
+  };
 
   if (selectedGroup) {
     return (
@@ -299,7 +349,9 @@ export function ResultsPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Duplicate Groups ({groups.length})</CardTitle>
+              <CardTitle>
+                Duplicate Groups ({filteredGroups.length} of {groups.length})
+              </CardTitle>
               {isLoading && <Badge variant="info">Loading...</Badge>}
             </div>
           </CardHeader>
@@ -345,6 +397,28 @@ export function ResultsPage() {
                     </div>
                   </div>
 
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Status:</label>
+                    <div className="flex gap-2">
+                      {([
+                        { key: 'all', label: 'All groups' },
+                        { key: 'pending', label: 'Unreviewed only' },
+                      ] as const).map((option) => (
+                        <button
+                          key={option.key}
+                          onClick={() => setStatusFilter(option.key)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                            statusFilter === option.key
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="ml-auto text-sm text-gray-600 dark:text-gray-400">
                     Showing {filteredGroups.length} of {groups.length} groups
                   </div>
@@ -353,6 +427,7 @@ export function ResultsPage() {
                 {sortedGroups.map((group) => {
                   const isContact = group.type === 'contact';
                   const similarityPercentage = Math.round(group.similarityScore * 100);
+                  const normalizedStatus = group.status || 'pending';
 
                   return (
                     <div
@@ -364,7 +439,7 @@ export function ResultsPage() {
                           ? 'border-yellow-400 dark:border-yellow-600'
                           : 'border-gray-200 dark:border-gray-700'
                       }`}
-                      onClick={() => setSelectedGroup(group)}
+                      onClick={() => handleSelectGroup(group)}
                     >
                       {group.similarityScore >= 0.95 && (
                         <div className="mb-3 flex items-center gap-2 text-green-700 dark:text-green-400">
@@ -385,6 +460,7 @@ export function ResultsPage() {
                             <span className="font-medium text-gray-900 dark:text-white">
                               {group.records.length} Duplicate Records
                             </span>
+                            {getStatusBadge(normalizedStatus)}
                             <div className="flex gap-2 items-center flex-wrap">
                               <TooltipBadge
                                 variant="info"
@@ -511,7 +587,7 @@ export function ResultsPage() {
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedGroup(group);
+                            handleSelectGroup(group);
                           }}
                         >
                           Review →

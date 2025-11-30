@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   DEDUP_RUN_ANALYSIS: 'dedup:run-analysis',
   DEDUP_GET_GROUPS: 'dedup:get-groups',
   DEDUP_MERGE: 'dedup:merge',
+  DEDUP_UPDATE_STATUS: 'dedup:update-status',
 
   // Data retrieval operations
   GET_CONTACTS: 'data:get-contacts',
