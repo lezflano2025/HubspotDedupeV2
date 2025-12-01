@@ -8,6 +8,7 @@ import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts, FieldS
 import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
+type ConfidenceFilter = 'all' | 'high' | 'medium' | 'low';
 
 const TooltipBadge = ({
   children,
@@ -53,15 +54,19 @@ export function ResultsPage() {
   const [importStatus, setImportStatus] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
-  const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
+  
+  // Codex: Use strict ConfidenceFilter type
+  const [filterConfidence, setFilterConfidence] = React.useState<ConfidenceFilter>('all');
+  
+  // Main: Status counts for progress bar
   const [statusCounts, setStatusCounts] = React.useState<DuplicateStatusCounts>({
     pending: 0,
     reviewed: 0,
     merged: 0,
     total: 0,
   });
-  
-  // Search state from Codex branch
+   
+  // Main: Search state
   const [searchTerm, setSearchTerm] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
 
@@ -75,7 +80,7 @@ export function ResultsPage() {
 
   const formatFieldName = (field: string) => field.replace(/_/g, ' ');
 
-  // Logic from Codex branch: Calculate top contributing fields
+  // Main: Helper functions
   const getTopContributingFields = (
     fieldScores?: FieldSimilarity[],
     matchedFields: string[] = []
@@ -96,7 +101,6 @@ export function ResultsPage() {
     return [];
   };
 
-  // Logic from Codex branch: Generate human-readable reason
   const buildDuplicateReasonSentence = (fields: FieldSimilarity[]): string => {
     if (!fields.length) {
       return 'These records share similarities across multiple fields.';
@@ -137,13 +141,13 @@ export function ResultsPage() {
     setError('');
 
     try {
-      // Main branch: Concurrent loading
+      // Main: Concurrent fetching
       const [fetchedGroups, counts] = await Promise.all([
         window.api.dedupGetGroups(objectType, 'pending'),
         window.api.dedupGetStatusCounts(objectType),
       ]);
 
-      // Codex branch: Score normalization
+      // Codex: Score normalization
       const normalizedGroups = fetchedGroups.map((group) => ({
         ...group,
         similarityScore: normalizeSimilarityScore(group.similarityScore),
@@ -235,6 +239,25 @@ export function ResultsPage() {
     return 'danger';
   };
 
+  // Codex: Calculate counts for filter chips
+  const confidenceCounts = React.useMemo<Record<ConfidenceFilter, number>>(() => {
+    const counts: Record<ConfidenceFilter, number> = {
+      all: groups.length,
+      high: 0,
+      medium: 0,
+      low: 0,
+    };
+
+    groups.forEach(({ similarityScore }) => {
+      if (similarityScore >= 0.95) counts.high += 1;
+      else if (similarityScore >= 0.85) counts.medium += 1;
+      else counts.low += 1;
+    });
+
+    return counts;
+  }, [groups]);
+
+  // Main: Get styles
   const getConfidenceStyles = (score: number) => {
     if (score >= 0.95) {
       return {
@@ -269,11 +292,10 @@ export function ResultsPage() {
         if (filterConfidence === 'low' && group.similarityScore >= 0.85) return false;
       }
 
-      // 2. Search Filter (from Codex branch)
+      // 2. Search Filter
       if (!debouncedSearch) return true;
 
       return group.records.some((record) => {
-        // Safe access to properties that might not exist on all record types
         const r = record as any;
         const name = `${r.first_name || ''} ${r.last_name || ''}`;
         
@@ -301,6 +323,15 @@ export function ResultsPage() {
     });
   }, [filteredGroups, sortBy]);
 
+  // Codex: Define filters config
+  const confidenceFilters: { level: ConfidenceFilter; label: string }[] = [
+    { level: 'all', label: 'All' },
+    { level: 'high', label: 'High' },
+    { level: 'medium', label: 'Medium' },
+    { level: 'low', label: 'Low' },
+  ];
+
+  // Main: Progress calculations
   const processedCount = statusCounts.reviewed + statusCounts.merged;
   const totalCount = statusCounts.total || groups.length;
   const progressPercentage = totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
@@ -477,21 +508,24 @@ export function ResultsPage() {
                   <div className="flex items-center gap-2">
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Filter:</label>
                     <div className="flex gap-2">
-                      {(['all', 'high', 'medium', 'low'] as const).map((level) => (
-                        <button
-                          key={level}
-                          onClick={() => setFilterConfidence(level)}
-                          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                            filterConfidence === level
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-                          }`}
-                        >
-                          {level === 'all'
-                            ? 'All Groups'
-                            : `${level.charAt(0).toUpperCase() + level.slice(1)} Confidence`}
-                        </button>
-                      ))}
+                      {confidenceFilters.map(({ level, label }) => {
+                        const isActive = filterConfidence === level;
+                        return (
+                          <button
+                            key={level}
+                            type="button"
+                            onClick={() => setFilterConfidence(level)}
+                            aria-pressed={isActive}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500 ${
+                              isActive
+                                ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                                : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
+                            }`}
+                          >
+                            {`${label}${level === 'all' ? ' Groups' : ' Confidence'} (${confidenceCounts[level]})`}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -518,13 +552,9 @@ export function ResultsPage() {
                 ) : (
                   sortedGroups.map((group) => {
                     const isContact = group.type === 'contact';
-                    // Main branch: Format similarity
                     const similarityPercentage = formatSimilarity(group.similarityScore);
-                    // Codex branch: Get top contributing fields
                     const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
-                    // Codex branch: Generate explanation sentence
                     const duplicateReason = buildDuplicateReasonSentence(topFields);
-                    // Main branch: Styles
                     const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
 
                     return (
