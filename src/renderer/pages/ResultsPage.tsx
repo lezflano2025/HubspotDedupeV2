@@ -57,7 +57,7 @@ export function ResultsPage() {
   
   // Codex: Use strict ConfidenceFilter type
   const [filterConfidence, setFilterConfidence] = React.useState<ConfidenceFilter>('all');
-  
+
   // Main: Status counts for progress bar
   const [statusCounts, setStatusCounts] = React.useState<DuplicateStatusCounts>({
     pending: 0,

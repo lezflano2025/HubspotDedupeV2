@@ -180,9 +180,15 @@ ipcMain.handle(IPC_CHANNELS.DEDUP_GET_GROUPS, async (_event, type: 'contact' | '
         type: group.object_type,
         records,
         similarityScore: matches[0]?.match_score || 0,
-        matchedFields: matches[0]?.matched_fields ? (typeof JSON.parse(matches[0].matched_fields) === 'object' && !Array.isArray(JSON.parse(matches[0].matched_fields)) ? JSON.parse(matches[0].matched_fields).fields || [] : JSON.parse(matches[0].matched_fields)) : [],
+        matchedFields: matches[0]?.matched_fields
+          ? typeof JSON.parse(matches[0].matched_fields) === 'object' && !Array.isArray(JSON.parse(matches[0].matched_fields))
+            ? JSON.parse(matches[0].matched_fields).fields || []
+            : JSON.parse(matches[0].matched_fields)
+          : [],
         fieldScores,
         status: group.status,
+        confidenceLevel: (group.confidence_level as 'high' | 'medium' | 'low') || undefined,
+        goldenRecordId: group.golden_hs_id || undefined,
       };
     });
 
@@ -192,6 +198,21 @@ ipcMain.handle(IPC_CHANNELS.DEDUP_GET_GROUPS, async (_event, type: 'contact' | '
     throw error;
   }
 });
+
+// RESOLUTION: Added both the Update Status handler (Codex) and the Get Status Counts handler (Main)
+
+ipcMain.handle(
+  IPC_CHANNELS.DEDUP_UPDATE_STATUS,
+  async (_event, groupId: string, status: string, goldenHsId?: string) => {
+    try {
+      const updated = DuplicateGroupRepository.updateStatus(groupId, status, goldenHsId);
+      return updated;
+    } catch (error) {
+      console.error('Error updating duplicate group status:', error);
+      throw error;
+    }
+  }
+);
 
 ipcMain.handle(IPC_CHANNELS.DEDUP_GET_STATUS_COUNTS, async (_event, type: 'contact' | 'company') => {
   try {

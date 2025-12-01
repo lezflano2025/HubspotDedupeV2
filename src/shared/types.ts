@@ -75,8 +75,12 @@ export interface DuplicateGroup {
   matchedFields: string[];
   fieldScores?: FieldSimilarity[];
   status?: 'pending' | 'reviewed' | 'merged' | string;
+  // Merged properties from both branches
+  confidenceLevel?: 'high' | 'medium' | 'low';
+  goldenRecordId?: string;
 }
 
+// Status counts for dashboard
 export interface DuplicateStatusCounts {
   pending: number;
   reviewed: number;
@@ -168,6 +172,11 @@ export interface ElectronAPI {
   dedupGetGroups: (type: 'contact' | 'company', status?: string) => Promise<DuplicateGroup[]>;
   dedupGetStatusCounts: (type: 'contact' | 'company') => Promise<DuplicateStatusCounts>;
   dedupMerge: (groupId: string, primaryId: string) => Promise<MergeResult>;
+  dedupUpdateGroupStatus: (
+    groupId: string,
+    status: 'pending' | 'reviewed' | 'merged' | string,
+    goldenHsId?: string
+  ) => Promise<DuplicateGroup | null>;
 
   // Data retrieval operations
   getContacts: (limit?: number, offset?: number) => Promise<GetContactsResult>;
