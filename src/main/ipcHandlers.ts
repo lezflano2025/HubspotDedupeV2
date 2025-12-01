@@ -199,6 +199,8 @@ ipcMain.handle(IPC_CHANNELS.DEDUP_GET_GROUPS, async (_event, type: 'contact' | '
   }
 });
 
+// RESOLUTION: Added both the Update Status handler (Codex) and the Get Status Counts handler (Main)
+
 ipcMain.handle(
   IPC_CHANNELS.DEDUP_UPDATE_STATUS,
   async (_event, groupId: string, status: string, goldenHsId?: string) => {
@@ -211,6 +213,27 @@ ipcMain.handle(
     }
   }
 );
+
+ipcMain.handle(IPC_CHANNELS.DEDUP_GET_STATUS_COUNTS, async (_event, type: 'contact' | 'company') => {
+  try {
+    const counts = DuplicateGroupRepository.countByStatus(type);
+    const pending = counts.pending || 0;
+    const reviewed = counts.reviewed || 0;
+    const merged = counts.merged || 0;
+    const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+
+    return {
+      ...counts,
+      pending,
+      reviewed,
+      merged,
+      total,
+    };
+  } catch (error) {
+    console.error('Error getting duplicate group status counts:', error);
+    throw error;
+  }
+});
 
 ipcMain.handle(IPC_CHANNELS.DEDUP_MERGE, async (_event, groupId: string, primaryId: string) => {
   try {

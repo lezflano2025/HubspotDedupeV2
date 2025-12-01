@@ -4,9 +4,11 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
-import type { DuplicateGroup, DeduplicationResult } from '../../shared/types';
+import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts, FieldSimilarity } from '../../shared/types';
+import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
+type ConfidenceFilter = 'all' | 'high' | 'medium' | 'low';
 
 const TooltipBadge = ({
   children,
@@ -52,21 +54,107 @@ export function ResultsPage() {
   const [importStatus, setImportStatus] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
-  const [filterConfidence, setFilterConfidence] = React.useState<'all' | 'high' | 'medium' | 'low'>('all');
-  const [statusFilter, setStatusFilter] = React.useState<'all' | 'pending'>('pending');
+  
+  // Codex: Use strict ConfidenceFilter type
+  const [filterConfidence, setFilterConfidence] = React.useState<ConfidenceFilter>('all');
+
+  // Main: Status counts for progress bar
+  const [statusCounts, setStatusCounts] = React.useState<DuplicateStatusCounts>({
+    pending: 0,
+    reviewed: 0,
+    merged: 0,
+    total: 0,
+  });
+   
+  // Main: Search state
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim().toLowerCase());
+    }, 250);
+
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
+
+  const formatFieldName = (field: string) => field.replace(/_/g, ' ');
+
+  // Main: Helper functions
+  const getTopContributingFields = (
+    fieldScores?: FieldSimilarity[],
+    matchedFields: string[] = []
+  ): FieldSimilarity[] => {
+    const scoredFields =
+      fieldScores
+        ?.filter((fs) => typeof fs.score === 'number' && fs.score >= 70)
+        .sort((a, b) => b.score - a.score) || [];
+
+    if (scoredFields.length > 0) {
+      return scoredFields;
+    }
+
+    if (matchedFields.length > 0) {
+      return matchedFields.map((field) => ({ field, score: 100 }));
+    }
+
+    return [];
+  };
+
+  const buildDuplicateReasonSentence = (fields: FieldSimilarity[]): string => {
+    if (!fields.length) {
+      return 'These records share similarities across multiple fields.';
+    }
+
+    const highlighted = fields
+      .slice(0, 3)
+      .map((f) => `${formatFieldName(f.field)} (${Math.round(f.score)}%)`);
+
+    if (highlighted.length === 1) {
+      return `Likely duplicates because ${highlighted[0]} is very similar.`;
+    }
+
+    if (highlighted.length === 2) {
+      return `Likely duplicates because ${highlighted[0]} and ${highlighted[1]} closely match.`;
+    }
+
+    const last = highlighted.pop();
+    return `Likely duplicates because ${highlighted.join(', ')} and ${last} all show strong matches.`;
+  };
 
   // Load groups on mount and when object type changes
   useEffect(() => {
     loadGroups();
   }, [objectType]);
 
+  const loadStatusCounts = async () => {
+    try {
+      const counts = await window.api.dedupGetStatusCounts(objectType);
+      setStatusCounts(counts);
+    } catch (err) {
+      console.error('Failed to load status counts:', err);
+    }
+  };
+
   const loadGroups = async () => {
     setIsLoading(true);
     setError('');
 
     try {
-      const fetchedGroups = await window.api.dedupGetGroups(objectType);
-      setGroups(fetchedGroups);
+      // Main: Concurrent fetching
+      const [fetchedGroups, counts] = await Promise.all([
+        window.api.dedupGetGroups(objectType, 'pending'),
+        window.api.dedupGetStatusCounts(objectType),
+      ]);
+
+      // Codex: Score normalization
+      const normalizedGroups = fetchedGroups.map((group) => ({
+        ...group,
+        similarityScore: normalizeSimilarityScore(group.similarityScore),
+      }));
+
+      setStatusCounts(counts);
+      setGroups(normalizedGroups);
     } catch (err) {
       console.error('Failed to load groups:', err);
       setError(err instanceof Error ? err.message : 'Failed to load duplicate groups');
@@ -121,27 +209,6 @@ export function ResultsPage() {
     }
   };
 
-  const updateGroupStatus = async (
-    groupId: string,
-    status: 'pending' | 'reviewed' | 'merged' | string,
-    goldenHsId?: string
-  ) => {
-    try {
-      const updated = await window.api.dedupUpdateGroupStatus(groupId, status, goldenHsId);
-
-      // Optimistically update UI even if API returns null
-      setGroups((prev) => prev.map((g) => (g.id === groupId ? { ...g, status } : g)));
-
-      setSelectedGroup((prev) => (prev && prev.id === groupId ? { ...prev, status } : prev));
-
-      return updated;
-    } catch (err) {
-      console.error('Failed to update group status:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update group status');
-      return null;
-    }
-  };
-
   const handleMerge = async (groupId: string, primaryId: string) => {
     setIsMerging(true);
     setError('');
@@ -150,7 +217,9 @@ export function ResultsPage() {
       const result = await window.api.dedupMerge(groupId, primaryId);
 
       if (result.success) {
-        await updateGroupStatus(groupId, 'merged', primaryId);
+        // Remove the merged group from the list
+        setGroups((prev) => prev.filter((g) => g.id !== groupId));
+        loadStatusCounts();
         setSelectedGroup(null);
         alert(`Successfully merged ${result.mergedIds.length} records!`);
       } else {
@@ -170,23 +239,80 @@ export function ResultsPage() {
     return 'danger';
   };
 
+  // Codex: Calculate counts for filter chips
+  const confidenceCounts = React.useMemo<Record<ConfidenceFilter, number>>(() => {
+    const counts: Record<ConfidenceFilter, number> = {
+      all: groups.length,
+      high: 0,
+      medium: 0,
+      low: 0,
+    };
+
+    groups.forEach(({ similarityScore }) => {
+      if (similarityScore >= 0.95) counts.high += 1;
+      else if (similarityScore >= 0.85) counts.medium += 1;
+      else counts.low += 1;
+    });
+
+    return counts;
+  }, [groups]);
+
+  // Main: Get styles
+  const getConfidenceStyles = (score: number) => {
+    if (score >= 0.95) {
+      return {
+        borderClass: 'border-l-4 border-l-green-500',
+        priorityClass: 'bg-green-50 text-green-800 dark:bg-green-900/30 dark:text-green-200',
+        priorityLabel: 'High Priority',
+      };
+    }
+
+    if (score >= 0.85) {
+      return {
+        borderClass: 'border-l-4 border-l-amber-400',
+        priorityClass: 'bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200',
+        priorityLabel: 'Medium Priority',
+      };
+    }
+
+    return {
+      borderClass: 'border-l-4 border-l-red-400',
+      priorityClass: 'bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-200',
+      priorityLabel: 'Low Priority',
+    };
+  };
+
   const filteredGroups = React.useMemo(() => {
     return groups.filter((group) => {
-      const normalizedStatus = group.status || 'pending';
-      const statusMatches = statusFilter === 'all' ? true : normalizedStatus === 'pending';
+      // 1. Confidence Filter
+      if (filterConfidence !== 'all') {
+        if (filterConfidence === 'high' && group.similarityScore < 0.95) return false;
+        if (filterConfidence === 'medium' && (group.similarityScore < 0.85 || group.similarityScore >= 0.95))
+          return false;
+        if (filterConfidence === 'low' && group.similarityScore >= 0.85) return false;
+      }
 
-      const confidenceMatches =
-        filterConfidence === 'all'
-          ? true
-          : filterConfidence === 'high'
-          ? group.similarityScore >= 0.95
-          : filterConfidence === 'medium'
-          ? group.similarityScore >= 0.85 && group.similarityScore < 0.95
-          : group.similarityScore < 0.85;
+      // 2. Search Filter
+      if (!debouncedSearch) return true;
 
-      return statusMatches && confidenceMatches;
+      return group.records.some((record) => {
+        const r = record as any;
+        const name = `${r.first_name || ''} ${r.last_name || ''}`;
+        
+        const valuesToSearch = [
+          name.trim(),
+          r.email,
+          r.company,
+          r.name,
+          r.domain,
+        ]
+          .filter(Boolean)
+          .map((value) => String(value).toLowerCase());
+
+        return valuesToSearch.some((value) => value.includes(debouncedSearch));
+      });
     });
-  }, [filterConfidence, groups, statusFilter]);
+  }, [debouncedSearch, filterConfidence, groups]);
 
   const sortedGroups = React.useMemo(() => {
     return [...filteredGroups].sort((a, b) => {
@@ -197,26 +323,18 @@ export function ResultsPage() {
     });
   }, [filteredGroups, sortBy]);
 
-  const handleSelectGroup = async (group: DuplicateGroup) => {
-    setSelectedGroup(group);
+  // Codex: Define filters config
+  const confidenceFilters: { level: ConfidenceFilter; label: string }[] = [
+    { level: 'all', label: 'All' },
+    { level: 'high', label: 'High' },
+    { level: 'medium', label: 'Medium' },
+    { level: 'low', label: 'Low' },
+  ];
 
-    if ((group.status || 'pending') === 'pending') {
-      await updateGroupStatus(group.id, 'reviewed', group.goldenRecordId);
-    }
-  };
-
-  const getStatusBadge = (status?: string) => {
-    const normalizedStatus = status || 'pending';
-
-    switch (normalizedStatus) {
-      case 'merged':
-        return <Badge variant="success">Merged</Badge>;
-      case 'reviewed':
-        return <Badge variant="warning">Reviewed</Badge>;
-      default:
-        return <Badge variant="default">Unreviewed</Badge>;
-    }
-  };
+  // Main: Progress calculations
+  const processedCount = statusCounts.reviewed + statusCounts.merged;
+  const totalCount = statusCounts.total || groups.length;
+  const progressPercentage = totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
 
   if (selectedGroup) {
     return (
@@ -233,7 +351,7 @@ export function ResultsPage() {
           onCancel={() => setSelectedGroup(null)}
           isMerging={isMerging}
           fieldScores={selectedGroup.fieldScores}
-          similarityScore={Math.round(selectedGroup.similarityScore * 100)}
+          similarityScore={selectedGroup.similarityScore}
         />
         {error && (
           <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -247,7 +365,6 @@ export function ResultsPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Duplicate Detection</h1>
           <p className="text-gray-600 dark:text-gray-400">
@@ -255,7 +372,6 @@ export function ResultsPage() {
           </p>
         </div>
 
-        {/* Controls */}
         <Card className="mb-6">
           <CardContent>
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -335,27 +451,40 @@ export function ResultsPage() {
           </CardContent>
         </Card>
 
-        {/* Data Viewer */}
         <DataViewer objectType={objectType} />
 
-        {/* Error Display */}
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
           </div>
         )}
 
-        {/* Groups List */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>
-                Duplicate Groups ({filteredGroups.length} of {groups.length})
-              </CardTitle>
+              <CardTitle>Duplicate Groups ({groups.length})</CardTitle>
               {isLoading && <Badge variant="info">Loading...</Badge>}
             </div>
           </CardHeader>
           <CardContent>
+            <div className="mb-6 space-y-2">
+              <div className="flex flex-wrap items-center justify-between text-sm">
+                <div className="font-medium text-gray-900 dark:text-gray-100">Review Progress</div>
+                <div className="text-gray-600 dark:text-gray-400">
+                  Reviewed: {statusCounts.reviewed} • Merged: {statusCounts.merged} • Total: {totalCount}
+                </div>
+              </div>
+              <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                <div
+                  className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-500"
+                  style={{ width: `${progressPercentage}%` }}
+                ></div>
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Processed {processedCount} of {totalCount} groups
+              </div>
+            </div>
+
             {groups.length === 0 && !isLoading ? (
               <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                 <p className="text-lg mb-2">No duplicate groups found</p>
@@ -379,88 +508,72 @@ export function ResultsPage() {
                   <div className="flex items-center gap-2">
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Filter:</label>
                     <div className="flex gap-2">
-                      {(['all', 'high', 'medium', 'low'] as const).map((level) => (
-                        <button
-                          key={level}
-                          onClick={() => setFilterConfidence(level)}
-                          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                            filterConfidence === level
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-                          }`}
-                        >
-                          {level === 'all'
-                            ? 'All Groups'
-                            : `${level.charAt(0).toUpperCase() + level.slice(1)} Confidence`}
-                        </button>
-                      ))}
+                      {confidenceFilters.map(({ level, label }) => {
+                        const isActive = filterConfidence === level;
+                        return (
+                          <button
+                            key={level}
+                            type="button"
+                            onClick={() => setFilterConfidence(level)}
+                            aria-pressed={isActive}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500 ${
+                              isActive
+                                ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                                : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
+                            }`}
+                          >
+                            {`${label}${level === 'all' ? ' Groups' : ' Confidence'} (${confidenceCounts[level]})`}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Status:</label>
-                    <div className="flex gap-2">
-                      {([
-                        { key: 'all', label: 'All groups' },
-                        { key: 'pending', label: 'Unreviewed only' },
-                      ] as const).map((option) => (
-                        <button
-                          key={option.key}
-                          onClick={() => setStatusFilter(option.key)}
-                          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                            statusFilter === option.key
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
+                  <div className="ml-auto flex flex-wrap items-center gap-3">
+                    <div>
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Search by name, email, or company"
+                        className="w-64 max-w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                      />
                     </div>
-                  </div>
-
-                  <div className="ml-auto text-sm text-gray-600 dark:text-gray-400">
-                    Showing {filteredGroups.length} of {groups.length} groups
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      Showing {filteredGroups.length} of {groups.length} groups
+                    </div>
                   </div>
                 </div>
 
-                {sortedGroups.map((group) => {
-                  const isContact = group.type === 'contact';
-                  const similarityPercentage = Math.round(group.similarityScore * 100);
-                  const normalizedStatus = group.status || 'pending';
+                {filteredGroups.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500 dark:text-gray-400">
+                    <p className="text-lg">No groups match this search</p>
+                  </div>
+                ) : (
+                  sortedGroups.map((group) => {
+                    const isContact = group.type === 'contact';
+                    const similarityPercentage = formatSimilarity(group.similarityScore);
+                    const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
+                    const duplicateReason = buildDuplicateReasonSentence(topFields);
+                    const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
 
-                  return (
-                    <div
-                      key={group.id}
-                      className={`border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-all ${
-                        group.similarityScore >= 0.95
-                          ? 'border-green-500 dark:border-green-600 shadow-md shadow-green-100 dark:shadow-green-900/20'
-                          : group.similarityScore >= 0.85
-                          ? 'border-yellow-400 dark:border-yellow-600'
-                          : 'border-gray-200 dark:border-gray-700'
-                      }`}
-                      onClick={() => handleSelectGroup(group)}
-                    >
-                      {group.similarityScore >= 0.95 && (
-                        <div className="mb-3 flex items-center gap-2 text-green-700 dark:text-green-400">
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path
-                              fillRule="evenodd"
-                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          <span className="text-xs font-semibold">High Priority - Review First</span>
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <span className="font-medium text-gray-900 dark:text-white">
-                              {group.records.length} Duplicate Records
-                            </span>
-                            {getStatusBadge(normalizedStatus)}
+                    return (
+                      <div
+                        key={group.id}
+                        className={`flex flex-col gap-3 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm bg-white dark:bg-gray-800 hover:shadow-md transition-all cursor-pointer ${borderClass}`}
+                        onClick={() => setSelectedGroup(group)}
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${priorityClass}`}>
+                                {priorityLabel}
+                              </span>
+                              <Badge variant="default">Group ID: {group.id}</Badge>
+                            </div>
+                            <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                              {group.records.length} Duplicate Records · {similarityPercentage}% Match
+                            </div>
                             <div className="flex gap-2 items-center flex-wrap">
                               <TooltipBadge
                                 variant="info"
@@ -490,112 +603,118 @@ export function ResultsPage() {
                               <Badge variant="default">{group.records.length} Records</Badge>
                             </div>
                           </div>
-
-                          {/* Show key fields for each record */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
-                            {group.records.slice(0, 3).map((record, idx) => (
-                              <div
-                                key={idx}
-                                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2"
-                              >
-                                <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
-                                  Record {idx + 1}
-                                </div>
-                                {isContact ? (
-                                  <div className="space-y-1 text-xs">
-                                    {record.first_name || record.last_name ? (
-                                      <div className="font-medium text-gray-900 dark:text-white truncate">
-                                        {record.first_name} {record.last_name}
-                                      </div>
-                                    ) : null}
-                                    {record.email && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        📧 {record.email as string}
-                                      </div>
-                                    )}
-                                    {record.company && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        🏢 {record.company as string}
-                                      </div>
-                                    )}
-                                    {record.job_title && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        💼 {record.job_title as string}
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className="space-y-1 text-xs">
-                                    {record.name && (
-                                      <div className="font-medium text-gray-900 dark:text-white truncate">
-                                        {record.name as string}
-                                      </div>
-                                    )}
-                                    {record.domain && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        🌐 {record.domain as string}
-                                      </div>
-                                    )}
-                                    {record.phone && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        📱 {record.phone as string}
-                                      </div>
-                                    )}
-                                    {record.city && record.state && (
-                                      <div className="text-gray-600 dark:text-gray-400 truncate">
-                                        📍 {record.city as string}, {record.state as string}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                            {group.records.length > 3 && (
-                              <div className="flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
-                                +{group.records.length - 3} more
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="mt-3 mb-2">
-                            <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Why these might be duplicates:
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {group.matchedFields.slice(0, 5).map((field) => (
-                                <span
-                                  key={field}
-                                  className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
-                                >
-                                  {field.replace(/_/g, ' ')}
-                                </span>
-                              ))}
-                              {group.matchedFields.length > 5 && (
-                                <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
-                                  +{group.matchedFields.length - 5} more
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="text-sm text-gray-600 dark:text-gray-400 font-mono">
-                            Group ID: {group.id}
+                          <div className="flex flex-col items-end gap-2">
+                            <Badge variant={getConfidenceBadgeVariant(group.similarityScore)}>{similarityPercentage}% Confidence</Badge>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedGroup(group);
+                              }}
+                            >
+                              Review →
+                            </Button>
                           </div>
                         </div>
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSelectGroup(group);
-                          }}
-                        >
-                          Review →
-                        </Button>
+
+                        {/* Show key fields for each record */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+                          {group.records.slice(0, 3).map((record, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2"
+                            >
+                              <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+                                Record {idx + 1}
+                              </div>
+                              {isContact ? (
+                                <div className="space-y-1 text-xs">
+                                  {record.first_name || record.last_name ? (
+                                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                                      {record.first_name} {record.last_name}
+                                    </div>
+                                  ) : null}
+                                  {record.email && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      📧 {record.email as string}
+                                    </div>
+                                  )}
+                                  {record.company && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      🏢 {record.company as string}
+                                    </div>
+                                  )}
+                                  {record.job_title && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      💼 {record.job_title as string}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="space-y-1 text-xs">
+                                  {record.name && (
+                                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                                      {record.name as string}
+                                    </div>
+                                  )}
+                                  {record.domain && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      🌐 {record.domain as string}
+                                    </div>
+                                  )}
+                                  {record.phone && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      📱 {record.phone as string}
+                                    </div>
+                                  )}
+                                  {record.city && record.state && (
+                                    <div className="text-gray-600 dark:text-gray-400 truncate">
+                                      📍 {record.city as string}, {record.state as string}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          {group.records.length > 3 && (
+                            <div className="flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
+                              +{group.records.length - 3} more
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-3 mb-2">
+                          <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                            Why these might be duplicates:
+                          </div>
+                          {/* Render the human-readable reason */}
+                          <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
+                          
+                          <div className="flex flex-wrap gap-1.5">
+                            {topFields.slice(0, 5).map((field) => (
+                              <span
+                                key={field.field}
+                                className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800"
+                              >
+                                {formatFieldName(field.field)} • {Math.round(field.score)}%
+                              </span>
+                            ))}
+                            {topFields.length > 5 && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400 self-center">
+                                +{topFields.length - 5} more
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-sm text-gray-600 dark:text-gray-400 font-mono">
+                          Group ID: {group.id}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             )}
           </CardContent>

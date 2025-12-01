@@ -55,6 +55,10 @@ const api: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_GET_GROUPS, type, status);
   },
 
+  dedupGetStatusCounts: async (type: 'contact' | 'company') => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_GET_STATUS_COUNTS, type);
+  },
+
   dedupMerge: async (groupId: string, primaryId: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_MERGE, groupId, primaryId);
   },
