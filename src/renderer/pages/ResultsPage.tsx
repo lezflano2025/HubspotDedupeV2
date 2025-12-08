@@ -4,7 +4,13 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
-import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts, FieldSimilarity, MergeResult } from '../../shared/types';
+import type {
+  DuplicateGroup,
+  DeduplicationResult,
+  DuplicateStatusCounts,
+  FieldSimilarity,
+  MergeResult,
+} from '../../shared/types';
 import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
@@ -50,6 +56,7 @@ export function ResultsPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<DeduplicationResult | null>(null);
   const [importStatus, setImportStatus] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -58,7 +65,15 @@ export function ResultsPage() {
   // Codex: Use strict ConfidenceFilter type
   const [filterConfidence, setFilterConfidence] = React.useState<ConfidenceFilter>('all');
 
-  // Dry-run mode state
+  // Progress state (from claude/export-realtime-progress)
+  const [progress, setProgress] = useState<{
+    stage: string;
+    current: number;
+    total: number;
+    message?: string;
+  } | null>(null);
+
+  // Dry-run mode state (from main)
   const [dryRunMode, setDryRunMode] = useState(false);
   const [previewResult, setPreviewResult] = useState<MergeResult | null>(null);
 
@@ -69,10 +84,10 @@ export function ResultsPage() {
     merged: 0,
     total: 0,
   });
-   
+
   // Main: Search state
-  const [searchTerm, setSearchTerm] = React.useState('');
-  const [debouncedSearch, setDebouncedSearch] = React.useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -125,6 +140,33 @@ export function ResultsPage() {
     const last = highlighted.pop();
     return `Likely duplicates because ${highlighted.join(', ')} and ${last} all show strong matches.`;
   };
+
+  // Subscribe to progress updates
+  useEffect(() => {
+    const unsubscribe = window.api.onProgressUpdate((event) => {
+      if (event.objectType === objectType) {
+        setProgress({
+          stage: event.stage,
+          current: event.current,
+          total: event.total,
+          message: event.message,
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [objectType]);
+
+  // Clear progress when operations complete
+  useEffect(() => {
+    if (!isAnalyzing && !isImporting) {
+      // Delay clearing to show completion briefly
+      const timer = setTimeout(() => setProgress(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isAnalyzing, isImporting]);
 
   // Load groups on mount and when object type changes
   useEffect(() => {
@@ -220,7 +262,7 @@ export function ResultsPage() {
 
     try {
       const result = await window.api.dedupMerge(groupId, primaryId, {
-        dryRun: dryRunMode
+        dryRun: dryRunMode,
       });
 
       if (result.dryRun && result.success) {
@@ -231,8 +273,8 @@ export function ResultsPage() {
           : '\n\nNo warnings.';
         alert(
           `Dry Run Complete!\n\n` +
-          `Would merge ${result.mergedIds.length} records into ${result.primaryId}.` +
-          warningsText
+            `Would merge ${result.mergedIds.length} records into ${result.primaryId}.` +
+            warningsText
         );
       } else if (result.success) {
         // Actual merge completed
@@ -248,6 +290,29 @@ export function ResultsPage() {
       setError(err instanceof Error ? err.message : 'Merge operation failed');
     } finally {
       setIsMerging(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    setError('');
+
+    try {
+      const result = await window.api.exportDuplicateGroups({
+        objectType,
+        status: 'pending',
+        format: 'csv',
+      });
+
+      if (result.success) {
+        alert(`Export complete!\n\nSaved ${result.recordCount} records to:\n${result.filePath}`);
+      } else {
+        setError(result.error || 'Export failed');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -305,7 +370,10 @@ export function ResultsPage() {
       // 1. Confidence Filter
       if (filterConfidence !== 'all') {
         if (filterConfidence === 'high' && group.similarityScore < 0.95) return false;
-        if (filterConfidence === 'medium' && (group.similarityScore < 0.85 || group.similarityScore >= 0.95))
+        if (
+          filterConfidence === 'medium' &&
+          (group.similarityScore < 0.85 || group.similarityScore >= 0.95)
+        )
           return false;
         if (filterConfidence === 'low' && group.similarityScore >= 0.85) return false;
       }
@@ -316,14 +384,8 @@ export function ResultsPage() {
       return group.records.some((record) => {
         const r = record as any;
         const name = `${r.first_name || ''} ${r.last_name || ''}`;
-        
-        const valuesToSearch = [
-          name.trim(),
-          r.email,
-          r.company,
-          r.name,
-          r.domain,
-        ]
+
+        const valuesToSearch = [name.trim(), r.email, r.company, r.name, r.domain]
           .filter(Boolean)
           .map((value) => String(value).toLowerCase());
 
@@ -352,7 +414,8 @@ export function ResultsPage() {
   // Main: Progress calculations
   const processedCount = statusCounts.reviewed + statusCounts.merged;
   const totalCount = statusCounts.total || groups.length;
-  const progressPercentage = totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
+  const progressPercentage =
+    totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
 
   if (selectedGroup) {
     return (
@@ -393,9 +456,13 @@ export function ResultsPage() {
         )}
         {previewResult && previewResult.preview && (
           <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-            <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">Preview Results</h3>
+            <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
+              Preview Results
+            </h3>
             <div className="text-sm text-blue-800 dark:text-blue-200">
-              <p className="mb-2">Records to merge: {previewResult.preview.recordsToMerge.length}</p>
+              <p className="mb-2">
+                Records to merge: {previewResult.preview.recordsToMerge.length}
+              </p>
               <div className="mb-2">
                 <strong>Estimated Changes:</strong>
                 <ul className="list-disc list-inside ml-2">
@@ -425,7 +492,9 @@ export function ResultsPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Duplicate Detection</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            Duplicate Detection
+          </h1>
           <p className="text-gray-600 dark:text-gray-400">
             Find and merge duplicate records in your HubSpot account
           </p>
@@ -459,7 +528,11 @@ export function ResultsPage() {
               </div>
 
               <div className="flex gap-2">
-                <Button variant="secondary" onClick={loadGroups} disabled={isLoading || isAnalyzing || isImporting}>
+                <Button
+                  variant="secondary"
+                  onClick={loadGroups}
+                  disabled={isLoading || isAnalyzing || isImporting}
+                >
                   Refresh
                 </Button>
                 <Button variant="secondary" onClick={runImport} isLoading={isImporting} disabled={isAnalyzing}>
@@ -467,6 +540,14 @@ export function ResultsPage() {
                 </Button>
                 <Button variant="primary" onClick={runAnalysis} isLoading={isAnalyzing} disabled={isImporting}>
                   Run Analysis
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleExport}
+                  isLoading={isExporting}
+                  disabled={groups.length === 0}
+                >
+                  Export to CSV
                 </Button>
               </div>
             </div>
@@ -526,6 +607,35 @@ export function ResultsPage() {
             </div>
           </CardHeader>
           <CardContent>
+            {progress && (
+              <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="font-medium text-blue-900 dark:text-blue-200">
+                    {progress.stage}
+                  </span>
+                  <span className="text-blue-700 dark:text-blue-300">
+                    {progress.current} / {progress.total}
+                  </span>
+                </div>
+                <div className="h-2 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300"
+                    style={{
+                      width:
+                        progress.total > 0
+                          ? `${Math.min(100, (progress.current / progress.total) * 100)}%`
+                          : '0%',
+                    }}
+                  />
+                </div>
+                {progress.message && (
+                  <div className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                    {progress.message}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mb-6 space-y-2">
               <div className="flex flex-wrap items-center justify-between text-sm">
                 <div className="font-medium text-gray-900 dark:text-gray-100">Review Progress</div>
@@ -553,10 +663,14 @@ export function ResultsPage() {
               <div className="space-y-3">
                 <div className="mb-6 flex gap-4 items-center flex-wrap">
                   <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Sort by:</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Sort by:
+                    </label>
                     <select
                       value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value as 'confidence' | 'recordCount')}
+                      onChange={(e) =>
+                        setSortBy(e.target.value as 'confidence' | 'recordCount')
+                      }
                       className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="confidence">Highest Confidence First</option>
@@ -565,7 +679,9 @@ export function ResultsPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Filter:</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Filter:
+                    </label>
                     <div className="flex gap-2">
                       {confidenceFilters.map(({ level, label }) => {
                         const isActive = filterConfidence === level;
@@ -581,7 +697,9 @@ export function ResultsPage() {
                                 : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
                             }`}
                           >
-                            {`${label}${level === 'all' ? ' Groups' : ' Confidence'} (${confidenceCounts[level]})`}
+                            {`${label}${level === 'all' ? ' Groups' : ' Confidence'} (${
+                              confidenceCounts[level]
+                            })`}
                           </button>
                         );
                       })}
@@ -612,9 +730,14 @@ export function ResultsPage() {
                   sortedGroups.map((group) => {
                     const isContact = group.type === 'contact';
                     const similarityPercentage = formatSimilarity(group.similarityScore);
-                    const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
+                    const topFields = getTopContributingFields(
+                      group.fieldScores,
+                      group.matchedFields
+                    );
                     const duplicateReason = buildDuplicateReasonSentence(topFields);
-                    const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
+                    const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(
+                      group.similarityScore
+                    );
 
                     return (
                       <div
@@ -625,7 +748,9 @@ export function ResultsPage() {
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div className="space-y-2">
                             <div className="flex items-center gap-2">
-                              <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${priorityClass}`}>
+                              <span
+                                className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${priorityClass}`}
+                              >
                                 {priorityLabel}
                               </span>
                               <Badge variant="default">Group ID: {group.id}</Badge>
@@ -663,7 +788,9 @@ export function ResultsPage() {
                             </div>
                           </div>
                           <div className="flex flex-col items-end gap-2">
-                            <Badge variant={getConfidenceBadgeVariant(group.similarityScore)}>{similarityPercentage}% Confidence</Badge>
+                            <Badge variant={getConfidenceBadgeVariant(group.similarityScore)}>
+                              {similarityPercentage}% Confidence
+                            </Badge>
                             <Button
                               variant="primary"
                               size="sm"
@@ -748,8 +875,10 @@ export function ResultsPage() {
                             Why these might be duplicates:
                           </div>
                           {/* Render the human-readable reason */}
-                          <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
-                          
+                          <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                            {duplicateReason}
+                          </p>
+
                           <div className="flex flex-wrap gap-1.5">
                             {topFields.slice(0, 5).map((field) => (
                               <span

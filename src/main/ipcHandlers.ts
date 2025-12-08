@@ -5,6 +5,8 @@ import { authenticateHubSpot, getConnectionStatus, disconnectHubSpot } from './h
 import { runContactDeduplication, runCompanyDeduplication } from './dedup';
 import { executeMerge } from './hubspot/merge';
 import { importContacts, importCompanies } from './hubspot/import';
+import { exportDuplicateGroups } from './export';
+import type { ExportOptions } from '../shared/types';
 
 /**
  * IPC handlers for communication between Main and Renderer processes
@@ -276,6 +278,21 @@ ipcMain.handle(
     }
   }
 );
+
+// Export operations
+ipcMain.handle(IPC_CHANNELS.EXPORT_DUPLICATE_GROUPS, async (_event, options: ExportOptions) => {
+  try {
+    console.log('Export duplicate groups requested:', options);
+    const result = await exportDuplicateGroups(options);
+    return result;
+  } catch (error) {
+    console.error('Export error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Export failed',
+    };
+  }
+});
 
 // Import operations
 ipcMain.handle(IPC_CHANNELS.HUBSPOT_IMPORT_CONTACTS, async (_event) => {

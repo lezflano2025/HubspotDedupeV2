@@ -175,6 +175,66 @@ export interface GetCompaniesResult {
   count: number;
 }
 
+// Export options
+export interface ExportOptions {
+  objectType: 'contact' | 'company';
+  status?: 'pending' | 'reviewed' | 'merged' | 'all';
+  format?: 'csv' | 'json';
+  includeFieldScores?: boolean;
+}
+
+// Export result
+export interface ExportResult {
+  success: boolean;
+  filePath?: string;
+  recordCount?: number;
+  error?: string;
+}
+
+// Exportable group
+export interface ExportableGroup {
+  groupId: string;
+  objectType: string;
+  confidenceLevel: string;
+  similarityScore: number;
+  status: string;
+  recordCount: number;
+  matchedFields: string[];
+  records: ExportableRecord[];
+}
+
+// Exportable record
+export interface ExportableRecord {
+  hsId: string;
+  isPrimary: boolean;
+  // Contact fields
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  jobTitle?: string;
+  // Company fields
+  name?: string;
+  domain?: string;
+  industry?: string;
+  city?: string;
+  state?: string;
+  // Metadata
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Progress event
+export interface ProgressEvent {
+  type: 'import' | 'analysis';
+  stage: string;
+  current: number;
+  total: number;
+  message?: string;
+  objectType?: 'contact' | 'company';
+}
+
 // API exposed to renderer via contextBridge
 export interface ElectronAPI {
   // Database operations
@@ -204,6 +264,12 @@ export interface ElectronAPI {
     status: 'pending' | 'reviewed' | 'merged' | string,
     goldenHsId?: string
   ) => Promise<DuplicateGroup | null>;
+
+  // Export operations
+  exportDuplicateGroups: (options: ExportOptions) => Promise<ExportResult>;
+
+  // Progress events
+  onProgressUpdate: (callback: (event: ProgressEvent) => void) => () => void;
 
   // Data retrieval operations
   getContacts: (limit?: number, offset?: number) => Promise<GetContactsResult>;

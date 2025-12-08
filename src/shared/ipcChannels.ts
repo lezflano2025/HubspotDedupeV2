@@ -23,6 +23,12 @@ export const IPC_CHANNELS = {
   DEDUP_MERGE: 'dedup:merge',
   DEDUP_UPDATE_STATUS: 'dedup:update-status',
 
+  // Export operations
+  EXPORT_DUPLICATE_GROUPS: 'export:duplicate-groups',
+
+  // Progress events
+  PROGRESS_UPDATE: 'progress:update',
+
   // Data retrieval operations
   GET_CONTACTS: 'data:get-contacts',
   GET_COMPANIES: 'data:get-companies',

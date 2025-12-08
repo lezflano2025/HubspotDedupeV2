@@ -1,3 +1,4 @@
+import { BrowserWindow } from 'electron';
 import { ContactRepository, CompanyRepository } from '../db';
 import { getAllExactContactMatches, getAllExactCompanyMatches } from './exactMatch';
 import { findContactDuplicatesWithBlocking, findCompanyDuplicatesWithBlocking } from './blockingKeys';
@@ -8,11 +9,29 @@ import {
   clearDuplicateGroups,
   getDuplicateGroupStats,
 } from './grouping';
+import { IPC_CHANNELS } from '../../shared/ipcChannels';
 
 /**
  * Main deduplication engine
  * Orchestrates exact and fuzzy matching algorithms
  */
+
+/**
+ * Emit progress update to renderer via IPC
+ */
+function emitProgress(stage: string, current: number, total: number, objectType: 'contact' | 'company') {
+  const windows = BrowserWindow.getAllWindows();
+  windows.forEach(win => {
+    win.webContents.send(IPC_CHANNELS.PROGRESS_UPDATE, {
+      type: 'analysis',
+      stage,
+      current,
+      total,
+      objectType,
+      message: `${stage}: ${current}/${total}`,
+    });
+  });
+}
 
 export interface DeduplicationOptions {
   runExactMatch?: boolean;
@@ -68,6 +87,7 @@ export async function runContactDeduplication(options: DeduplicationOptions = {}
   if (runExactMatch) {
     console.log('--- Phase 1: Exact Matching ---');
     onProgress?.('exact_match', 0, 1);
+    emitProgress('Exact Matching', 0, 1, 'contact');
 
     const exactMatchGroups = getAllExactContactMatches();
     console.log(`Found ${exactMatchGroups.length} exact match groups`);
@@ -82,6 +102,7 @@ export async function runContactDeduplication(options: DeduplicationOptions = {}
 
     console.log(`Saved ${exactGroups} exact match groups, ${matchedIds.size} contacts matched`);
     onProgress?.('exact_match', 1, 1);
+    emitProgress('Exact Matching', 1, 1, 'contact');
   }
 
   // Phase 2: Fuzzy Match (using blocking keys for performance)
@@ -90,12 +111,14 @@ export async function runContactDeduplication(options: DeduplicationOptions = {}
 
     if (allContacts.length > 1) {
       onProgress?.('fuzzy_match', 0, 1);
+      emitProgress('Fuzzy Matching', 0, 1, 'contact');
 
       // Use blocking key strategy instead of O(n²) comparison
       const fuzzyMatchGroups = await findContactDuplicatesWithBlocking(
         fuzzyMinScore,
         (current, total) => {
           onProgress?.('fuzzy_match', current, total);
+          emitProgress('Fuzzy Matching', current, total, 'contact');
         }
       );
 
@@ -167,6 +190,7 @@ export async function runCompanyDeduplication(options: DeduplicationOptions = {}
   if (runExactMatch) {
     console.log('--- Phase 1: Exact Matching ---');
     onProgress?.('exact_match', 0, 1);
+    emitProgress('Exact Matching', 0, 1, 'company');
 
     const exactMatchGroups = getAllExactCompanyMatches();
     console.log(`Found ${exactMatchGroups.length} exact match groups`);
@@ -181,6 +205,7 @@ export async function runCompanyDeduplication(options: DeduplicationOptions = {}
 
     console.log(`Saved ${exactGroups} exact match groups, ${matchedIds.size} companies matched`);
     onProgress?.('exact_match', 1, 1);
+    emitProgress('Exact Matching', 1, 1, 'company');
   }
 
   // Phase 2: Fuzzy Match (using blocking keys for performance)
@@ -189,12 +214,14 @@ export async function runCompanyDeduplication(options: DeduplicationOptions = {}
 
     if (allCompanies.length > 1) {
       onProgress?.('fuzzy_match', 0, 1);
+      emitProgress('Fuzzy Matching', 0, 1, 'company');
 
       // Use blocking key strategy instead of O(n²) comparison
       const fuzzyMatchGroups = await findCompanyDuplicatesWithBlocking(
         fuzzyMinScore,
         (current, total) => {
           onProgress?.('fuzzy_match', current, total);
+          emitProgress('Fuzzy Matching', current, total, 'company');
         }
       );
 

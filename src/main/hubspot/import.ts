@@ -1,11 +1,35 @@
+import { BrowserWindow } from 'electron';
 import { requireHubSpotClient } from './auth';
 import { ContactRepository, CompanyRepository, ImportBatchRepository } from '../db';
 import { v4 as uuidv4 } from 'uuid';
+import { IPC_CHANNELS } from '../../shared/ipcChannels';
 
 /**
  * HubSpot data import operations
  * Fetches contacts/companies from HubSpot and stores them in the local database
  */
+
+/**
+ * Emit import progress update to renderer via IPC
+ */
+function emitImportProgress(
+  objectType: 'contact' | 'company',
+  fetched: number,
+  saved: number,
+  isComplete: boolean
+) {
+  const windows = BrowserWindow.getAllWindows();
+  windows.forEach(win => {
+    win.webContents.send(IPC_CHANNELS.PROGRESS_UPDATE, {
+      type: 'import',
+      stage: isComplete ? 'Complete' : 'Importing',
+      current: saved,
+      total: fetched,
+      objectType,
+      message: `Imported ${saved} of ${fetched} ${objectType}s`,
+    });
+  });
+}
 
 export interface ImportProgress {
   batchId: string;
@@ -131,6 +155,9 @@ export async function importContacts(
         }
       }
 
+      // Emit progress via IPC
+      emitImportProgress('contact', totalFetched, totalSaved, false);
+
       // Report progress
       if (onProgress) {
         onProgress({
@@ -144,6 +171,9 @@ export async function importContacts(
 
       console.log(`Progress: ${totalFetched} fetched, ${totalSaved} saved`);
     }
+
+    // Emit completion progress via IPC
+    emitImportProgress('contact', totalFetched, totalSaved, true);
 
     // Update batch record
     ImportBatchRepository.update(batchId, {
@@ -272,6 +302,9 @@ export async function importCompanies(
         }
       }
 
+      // Emit progress via IPC
+      emitImportProgress('company', totalFetched, totalSaved, false);
+
       // Report progress
       if (onProgress) {
         onProgress({
@@ -285,6 +318,9 @@ export async function importCompanies(
 
       console.log(`Progress: ${totalFetched} fetched, ${totalSaved} saved`);
     }
+
+    // Emit completion progress via IPC
+    emitImportProgress('company', totalFetched, totalSaved, true);
 
     // Update batch record
     ImportBatchRepository.update(batchId, {
