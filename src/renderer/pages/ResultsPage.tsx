@@ -4,7 +4,7 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
-import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts, FieldSimilarity } from '../../shared/types';
+import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts, FieldSimilarity, MergeResult } from '../../shared/types';
 import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
@@ -54,9 +54,13 @@ export function ResultsPage() {
   const [importStatus, setImportStatus] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
-  
+
   // Codex: Use strict ConfidenceFilter type
   const [filterConfidence, setFilterConfidence] = React.useState<ConfidenceFilter>('all');
+
+  // Dry-run mode state
+  const [dryRunMode, setDryRunMode] = useState(false);
+  const [previewResult, setPreviewResult] = useState<MergeResult | null>(null);
 
   // Main: Status counts for progress bar
   const [statusCounts, setStatusCounts] = React.useState<DuplicateStatusCounts>({
@@ -212,12 +216,26 @@ export function ResultsPage() {
   const handleMerge = async (groupId: string, primaryId: string) => {
     setIsMerging(true);
     setError('');
+    setPreviewResult(null);
 
     try {
-      const result = await window.api.dedupMerge(groupId, primaryId);
+      const result = await window.api.dedupMerge(groupId, primaryId, {
+        dryRun: dryRunMode
+      });
 
-      if (result.success) {
-        // Remove the merged group from the list
+      if (result.dryRun && result.success) {
+        // Show preview instead of completing merge
+        setPreviewResult(result);
+        const warningsText = result.preview?.warnings.length
+          ? '\n\nWarnings:\n' + result.preview.warnings.join('\n')
+          : '\n\nNo warnings.';
+        alert(
+          `Dry Run Complete!\n\n` +
+          `Would merge ${result.mergedIds.length} records into ${result.primaryId}.` +
+          warningsText
+        );
+      } else if (result.success) {
+        // Actual merge completed
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
         loadStatusCounts();
         setSelectedGroup(null);
@@ -339,10 +357,24 @@ export function ResultsPage() {
   if (selectedGroup) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-        <div className="mb-4">
+        <div className="mb-4 flex items-center justify-between">
           <Button variant="secondary" onClick={() => setSelectedGroup(null)}>
             ← Back to Groups
           </Button>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={dryRunMode}
+              onChange={(e) => setDryRunMode(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Dry Run Mode
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              (Preview without merging)
+            </span>
+          </label>
         </div>
         <ComparisonView
           records={selectedGroup.records}
@@ -352,10 +384,37 @@ export function ResultsPage() {
           isMerging={isMerging}
           fieldScores={selectedGroup.fieldScores}
           similarityScore={selectedGroup.similarityScore}
+          dryRunMode={dryRunMode}
         />
         {error && (
           <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+          </div>
+        )}
+        {previewResult && previewResult.preview && (
+          <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">Preview Results</h3>
+            <div className="text-sm text-blue-800 dark:text-blue-200">
+              <p className="mb-2">Records to merge: {previewResult.preview.recordsToMerge.length}</p>
+              <div className="mb-2">
+                <strong>Estimated Changes:</strong>
+                <ul className="list-disc list-inside ml-2">
+                  {previewResult.preview.estimatedChanges.map((change, i) => (
+                    <li key={i}>{change}</li>
+                  ))}
+                </ul>
+              </div>
+              {previewResult.preview.warnings.length > 0 && (
+                <div>
+                  <strong>Warnings:</strong>
+                  <ul className="list-disc list-inside ml-2">
+                    {previewResult.preview.warnings.map((warning, i) => (
+                      <li key={i}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

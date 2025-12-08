@@ -1,24 +1,90 @@
 import { requireHubSpotClient } from './auth';
 import { ContactRepository, CompanyRepository, DuplicateGroupRepository, MergeHistoryRepository } from '../db';
 import { createMergeBackup } from '../dedup/backup';
+import type { MergeOptions, MergeResult, MergePreview } from '../../shared/types';
 
 /**
  * HubSpot merge operations
  * Handles merging duplicate contacts and companies using the HubSpot API
  */
 
-export interface MergeOptions {
-  groupId: string;
-  primaryRecordId: string;
-  createBackup?: boolean;
-}
+/**
+ * Generate a preview of what would be merged
+ */
+function generateMergePreview(
+  group: { object_type: string },
+  primaryId: string,
+  secondaryIds: string[],
+  matches: Array<{ record_hs_id: string }>
+): MergePreview {
+  const warnings: string[] = [];
+  const estimatedChanges: string[] = [];
 
-export interface MergeResult {
-  success: boolean;
-  primaryId: string;
-  mergedIds: string[];
-  backupPath?: string;
-  error?: string;
+  // Get actual record data for preview
+  const Repository = group.object_type === 'contact' ? ContactRepository : CompanyRepository;
+
+  const primaryRecord = Repository.findByHsId(primaryId);
+  const secondaryRecords = secondaryIds.map(id => Repository.findByHsId(id)).filter(Boolean);
+
+  // Build preview data
+  const recordsToMerge = secondaryRecords.map(record => {
+    const keyFields: Record<string, unknown> = {};
+
+    if (group.object_type === 'contact') {
+      keyFields.email = record?.email;
+      keyFields.name = `${record?.first_name || ''} ${record?.last_name || ''}`.trim();
+      keyFields.phone = record?.phone;
+      keyFields.company = record?.company;
+    } else {
+      keyFields.name = record?.name;
+      keyFields.domain = record?.domain;
+      keyFields.phone = record?.phone;
+    }
+
+    return {
+      hsId: record?.hs_id || '',
+      displayName: keyFields.name as string || keyFields.email as string || record?.hs_id || '',
+      keyFields,
+    };
+  });
+
+  // Generate estimated changes description
+  estimatedChanges.push(
+    `${secondaryIds.length} record(s) will be merged into primary record ${primaryId}`
+  );
+  estimatedChanges.push(
+    `Associations from merged records will be transferred to the primary record`
+  );
+  estimatedChanges.push(
+    `Merged records will be deleted from HubSpot`
+  );
+
+  // Add warnings for potential issues
+  if (secondaryIds.length > 5) {
+    warnings.push(`Large merge: ${secondaryIds.length} records will be merged. Consider reviewing carefully.`);
+  }
+
+  // Check for data that might be lost
+  secondaryRecords.forEach(record => {
+    if (record?.properties) {
+      try {
+        const props = JSON.parse(record.properties);
+        const propCount = Object.keys(props).length;
+        if (propCount > 20) {
+          warnings.push(`Record ${record.hs_id} has ${propCount} properties. Some data may not transfer.`);
+        }
+      } catch {
+        // Ignore JSON parse errors
+      }
+    }
+  });
+
+  return {
+    primaryRecord: primaryRecord || {},
+    recordsToMerge,
+    estimatedChanges,
+    warnings,
+  };
 }
 
 /**
@@ -72,15 +138,20 @@ async function mergeCompanies(primaryId: string, secondaryIds: string[]): Promis
 }
 
 /**
- * Execute a merge operation
- * Creates backup, merges in HubSpot, updates database
+ * Execute a merge operation (or preview in dry-run mode)
  */
 export async function executeMerge(options: MergeOptions): Promise<MergeResult> {
-  const { groupId, primaryRecordId, createBackup: shouldBackup = true } = options;
+  const {
+    groupId,
+    primaryRecordId,
+    createBackup: shouldBackup = true,
+    dryRun = false  // NEW
+  } = options;
 
-  console.log(`=== Starting Merge Operation ===`);
+  console.log(`=== ${dryRun ? '[DRY RUN] ' : ''}Starting Merge Operation ===`);
   console.log(`Group ID: ${groupId}`);
   console.log(`Primary Record: ${primaryRecordId}`);
+  console.log(`Dry Run: ${dryRun}`);
 
   let backupPath: string | undefined;
 
@@ -109,16 +180,36 @@ export async function executeMerge(options: MergeOptions): Promise<MergeResult> 
       throw new Error('No secondary records to merge');
     }
 
+    // 5. DRY RUN: Return preview without making changes
+    if (dryRun) {
+      console.log(`[DRY RUN] Would merge ${secondaryIds.length} records into ${primaryRecordId}`);
+      console.log(`[DRY RUN] Secondary IDs: ${secondaryIds.join(', ')}`);
+
+      const preview = generateMergePreview(group, primaryRecordId, secondaryIds, matches);
+
+      console.log(`[DRY RUN] Preview generated successfully`);
+      console.log(`=== [DRY RUN] Merge Preview Complete ===`);
+
+      return {
+        success: true,
+        primaryId: primaryRecordId,
+        mergedIds: secondaryIds,
+        dryRun: true,
+        preview,
+      };
+    }
+
+    // 6. ACTUAL MERGE: Continue with real operation
     console.log(`Merging ${secondaryIds.length} records into primary ${primaryRecordId}`);
 
-    // 5. Create backup before merging
+    // Create backup before merging
     if (shouldBackup) {
       console.log('Creating backup...');
       backupPath = createMergeBackup(groupId, primaryRecordId);
       console.log(`Backup created: ${backupPath}`);
     }
 
-    // 6. Perform the merge in HubSpot
+    // Perform the merge in HubSpot
     console.log('Executing merge in HubSpot...');
     if (group.object_type === 'contact') {
       await mergeContacts(primaryRecordId, secondaryIds);
@@ -128,10 +219,10 @@ export async function executeMerge(options: MergeOptions): Promise<MergeResult> 
 
     console.log('HubSpot merge complete');
 
-    // 7. Update duplicate group status
+    // Update duplicate group status
     DuplicateGroupRepository.updateStatus(groupId, 'merged', primaryRecordId);
 
-    // 8. Create merge history record
+    // Create merge history record
     MergeHistoryRepository.create({
       group_id: groupId,
       primary_hs_id: primaryRecordId,
@@ -141,7 +232,7 @@ export async function executeMerge(options: MergeOptions): Promise<MergeResult> 
       metadata: backupPath ? JSON.stringify({ backupPath }) : undefined,
     });
 
-    // 9. Delete merged records from local database
+    // Delete merged records from local database
     if (group.object_type === 'contact') {
       secondaryIds.forEach((id) => ContactRepository.delete(id));
     } else {
@@ -155,9 +246,10 @@ export async function executeMerge(options: MergeOptions): Promise<MergeResult> 
       primaryId: primaryRecordId,
       mergedIds: secondaryIds,
       backupPath,
+      dryRun: false,
     };
   } catch (error) {
-    console.error('=== Merge Operation Failed ===');
+    console.error(`=== ${dryRun ? '[DRY RUN] ' : ''}Merge Operation Failed ===`);
     console.error(error);
 
     return {
@@ -166,6 +258,7 @@ export async function executeMerge(options: MergeOptions): Promise<MergeResult> 
       mergedIds: [],
       backupPath,
       error: error instanceof Error ? error.message : 'Merge operation failed',
+      dryRun,
     };
   }
 }

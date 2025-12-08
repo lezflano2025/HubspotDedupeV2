@@ -89,12 +89,35 @@ export interface DuplicateStatusCounts {
   [key: string]: number;
 }
 
+// Merge options
+export interface MergeOptions {
+  groupId: string;
+  primaryRecordId: string;
+  createBackup?: boolean;
+  dryRun?: boolean;  // NEW: Preview mode
+}
+
+// Merge preview information for dry-run mode
+export interface MergePreview {
+  primaryRecord: Record<string, unknown>;
+  recordsToMerge: Array<{
+    hsId: string;
+    displayName: string;
+    keyFields: Record<string, unknown>;
+  }>;
+  estimatedChanges: string[];
+  warnings: string[];
+}
+
 // Merge result
 export interface MergeResult {
   success: boolean;
   primaryId: string;
   mergedIds: string[];
+  backupPath?: string;
   error?: string;
+  dryRun?: boolean;  // NEW: Indicates this was a dry run
+  preview?: MergePreview;  // NEW: Detailed preview data
 }
 
 // Import result
@@ -171,7 +194,11 @@ export interface ElectronAPI {
   dedupRunAnalysis: (type: 'contact' | 'company') => Promise<DeduplicationResult>;
   dedupGetGroups: (type: 'contact' | 'company', status?: string) => Promise<DuplicateGroup[]>;
   dedupGetStatusCounts: (type: 'contact' | 'company') => Promise<DuplicateStatusCounts>;
-  dedupMerge: (groupId: string, primaryId: string) => Promise<MergeResult>;
+  dedupMerge: (
+    groupId: string,
+    primaryId: string,
+    options?: { dryRun?: boolean; createBackup?: boolean }
+  ) => Promise<MergeResult>;
   dedupUpdateGroupStatus: (
     groupId: string,
     status: 'pending' | 'reviewed' | 'merged' | string,
