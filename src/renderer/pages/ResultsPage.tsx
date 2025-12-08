@@ -50,13 +50,22 @@ export function ResultsPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<DeduplicationResult | null>(null);
   const [importStatus, setImportStatus] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [sortBy, setSortBy] = React.useState<'confidence' | 'recordCount'>('confidence');
-  
+
   // Codex: Use strict ConfidenceFilter type
   const [filterConfidence, setFilterConfidence] = React.useState<ConfidenceFilter>('all');
+
+  // Progress state
+  const [progress, setProgress] = useState<{
+    stage: string;
+    current: number;
+    total: number;
+    message?: string;
+  } | null>(null);
 
   // Main: Status counts for progress bar
   const [statusCounts, setStatusCounts] = React.useState<DuplicateStatusCounts>({
@@ -121,6 +130,33 @@ export function ResultsPage() {
     const last = highlighted.pop();
     return `Likely duplicates because ${highlighted.join(', ')} and ${last} all show strong matches.`;
   };
+
+  // Subscribe to progress updates
+  useEffect(() => {
+    const unsubscribe = window.api.onProgressUpdate((event) => {
+      if (event.objectType === objectType) {
+        setProgress({
+          stage: event.stage,
+          current: event.current,
+          total: event.total,
+          message: event.message,
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [objectType]);
+
+  // Clear progress when operations complete
+  useEffect(() => {
+    if (!isAnalyzing && !isImporting) {
+      // Delay clearing to show completion briefly
+      const timer = setTimeout(() => setProgress(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isAnalyzing, isImporting]);
 
   // Load groups on mount and when object type changes
   useEffect(() => {
@@ -230,6 +266,29 @@ export function ResultsPage() {
       setError(err instanceof Error ? err.message : 'Merge operation failed');
     } finally {
       setIsMerging(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    setError('');
+
+    try {
+      const result = await window.api.exportDuplicateGroups({
+        objectType,
+        status: 'pending',
+        format: 'csv',
+      });
+
+      if (result.success) {
+        alert(`Export complete!\n\nSaved ${result.recordCount} records to:\n${result.filePath}`);
+      } else {
+        setError(result.error || 'Export failed');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -409,6 +468,14 @@ export function ResultsPage() {
                 <Button variant="primary" onClick={runAnalysis} isLoading={isAnalyzing} disabled={isImporting}>
                   Run Analysis
                 </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleExport}
+                  isLoading={isExporting}
+                  disabled={groups.length === 0}
+                >
+                  Export to CSV
+                </Button>
               </div>
             </div>
 
@@ -467,6 +534,34 @@ export function ResultsPage() {
             </div>
           </CardHeader>
           <CardContent>
+            {progress && (
+              <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="font-medium text-blue-900 dark:text-blue-200">
+                    {progress.stage}
+                  </span>
+                  <span className="text-blue-700 dark:text-blue-300">
+                    {progress.current} / {progress.total}
+                  </span>
+                </div>
+                <div className="h-2 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300"
+                    style={{
+                      width: progress.total > 0
+                        ? `${Math.min(100, (progress.current / progress.total) * 100)}%`
+                        : '0%'
+                    }}
+                  />
+                </div>
+                {progress.message && (
+                  <div className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                    {progress.message}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mb-6 space-y-2">
               <div className="flex flex-wrap items-center justify-between text-sm">
                 <div className="font-medium text-gray-900 dark:text-gray-100">Review Progress</div>

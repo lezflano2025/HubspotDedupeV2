@@ -1,6 +1,6 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import { IPC_CHANNELS } from '../shared/ipcChannels';
-import type { ElectronAPI } from '../shared/types';
+import type { ElectronAPI, ProgressEvent, ExportOptions } from '../shared/types';
 
 /**
  * Preload script that exposes a safe API to the renderer process
@@ -69,6 +69,22 @@ const api: ElectronAPI = {
     goldenHsId?: string
   ) => {
     return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_UPDATE_STATUS, groupId, status, goldenHsId);
+  },
+
+  // Export operations
+  exportDuplicateGroups: async (options: ExportOptions) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.EXPORT_DUPLICATE_GROUPS, options);
+  },
+
+  // Progress events
+  onProgressUpdate: (callback: (event: ProgressEvent) => void) => {
+    const handler = (_event: IpcRendererEvent, data: ProgressEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.PROGRESS_UPDATE, handler);
+
+    // Return cleanup function
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PROGRESS_UPDATE, handler);
+    };
   },
 
   // Data retrieval operations
