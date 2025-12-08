@@ -21,6 +21,7 @@ interface ComparisonViewProps {
   isMerging?: boolean;
   fieldScores?: FieldSimilarity[];
   similarityScore?: number;
+  dryRunMode?: boolean;
 }
 
 // Key fields to show at the top for contacts
@@ -174,6 +175,7 @@ export function ComparisonView({
   isMerging = false,
   fieldScores = [],
   similarityScore = 0,
+  dryRunMode = false,
 }: ComparisonViewProps) {
   const [selectedPrimary, setSelectedPrimary] = React.useState<string>(goldenRecordId || records[0]?.hs_id || '');
   const similarityPercent = formatSimilarity(similarityScore);
@@ -380,8 +382,19 @@ export function ComparisonView({
           <Button variant="secondary" onClick={onCancel} disabled={isMerging}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleMerge} isLoading={isMerging} disabled={!selectedPrimary}>
-            {isMerging ? 'Merging...' : 'Merge Records'}
+          <Button
+            variant={dryRunMode ? 'secondary' : 'primary'}
+            onClick={handleMerge}
+            isLoading={isMerging}
+            disabled={!selectedPrimary}
+          >
+            {isMerging
+              ? dryRunMode
+                ? 'Generating Preview...'
+                : 'Merging...'
+              : dryRunMode
+              ? '👁 Preview Merge'
+              : 'Merge Records'}
           </Button>
         </div>
 
