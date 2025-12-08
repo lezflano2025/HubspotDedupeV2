@@ -19,6 +19,20 @@ interface HubSpotClientConfig {
   minTime?: number;
 }
 
+export interface RetryOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  retryableStatusCodes?: number[];
+}
+
+const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  maxDelayMs: 30000,
+  retryableStatusCodes: [429, 500, 502, 503, 504],
+};
+
 export class HubSpotApiClient {
   private client: Client;
   private limiter: Bottleneck;
@@ -71,6 +85,125 @@ export class HubSpotApiClient {
    */
   private async rateLimited<T>(fn: () => Promise<T>): Promise<T> {
     return this.limiter.schedule(() => fn());
+  }
+
+  /**
+   * Execute an operation with exponential backoff retry
+   * Retries on network errors and specified HTTP status codes
+   */
+  async withRetry<T>(
+    operation: () => Promise<T>,
+    options: RetryOptions = {}
+  ): Promise<T> {
+    const config = { ...DEFAULT_RETRY_OPTIONS, ...options };
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Check if we should retry
+        const shouldRetry = this.isRetryableError(error, config.retryableStatusCodes);
+
+        if (!shouldRetry || attempt === config.maxRetries) {
+          console.error(`API call failed after ${attempt + 1} attempts:`, lastError.message);
+          throw lastError;
+        }
+
+        // Calculate delay with exponential backoff + jitter
+        const exponentialDelay = config.baseDelayMs * Math.pow(2, attempt);
+        const jitter = Math.random() * 0.3 * exponentialDelay; // 0-30% jitter
+        const delay = Math.min(exponentialDelay + jitter, config.maxDelayMs);
+
+        console.log(
+          `API call failed (attempt ${attempt + 1}/${config.maxRetries + 1}). ` +
+          `Retrying in ${Math.round(delay)}ms... Error: ${lastError.message}`
+        );
+
+        await this.sleep(delay);
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * Check if an error is retryable
+   */
+  private isRetryableError(error: unknown, retryableStatusCodes: number[]): boolean {
+    // Network errors are always retryable
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      if (
+        message.includes('network') ||
+        message.includes('econnreset') ||
+        message.includes('econnrefused') ||
+        message.includes('etimedout') ||
+        message.includes('socket hang up')
+      ) {
+        return true;
+      }
+    }
+
+    // Check for HTTP status codes in error
+    const statusCode = this.extractStatusCode(error);
+    if (statusCode && retryableStatusCodes.includes(statusCode)) {
+      return true;
+    }
+
+    // Don't retry client errors (4xx except 429)
+    if (statusCode && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
+      return false;
+    }
+
+    return false;
+  }
+
+  /**
+   * Extract HTTP status code from error if available
+   */
+  private extractStatusCode(error: unknown): number | null {
+    if (!error || typeof error !== 'object') return null;
+
+    // HubSpot API client errors typically have response.status
+    const err = error as Record<string, unknown>;
+
+    if (err.statusCode && typeof err.statusCode === 'number') {
+      return err.statusCode;
+    }
+
+    if (err.status && typeof err.status === 'number') {
+      return err.status;
+    }
+
+    if (err.response && typeof err.response === 'object') {
+      const response = err.response as Record<string, unknown>;
+      if (response.status && typeof response.status === 'number') {
+        return response.status;
+      }
+      if (response.statusCode && typeof response.statusCode === 'number') {
+        return response.statusCode;
+      }
+    }
+
+    // Check error message for status code patterns
+    if (err.message && typeof err.message === 'string') {
+      const match = err.message.match(/\b(4\d{2}|5\d{2})\b/);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Sleep utility
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
@@ -129,17 +262,20 @@ export class HubSpotApiClient {
     results: unknown[];
     paging?: { next?: { after: string } };
   }> {
-    return this.rateLimited(async () => {
-      const response = await this.client.crm.contacts.basicApi.getPage(
-        options?.limit || 100,
-        options?.after,
-        options?.properties,
-        undefined,
-        undefined,
-        false
-      );
-      return response as { results: unknown[]; paging?: { next?: { after: string } } };
-    });
+    return this.withRetry(
+      () => this.rateLimited(async () => {
+        const response = await this.client.crm.contacts.basicApi.getPage(
+          options?.limit || 100,
+          options?.after,
+          options?.properties,
+          undefined,
+          undefined,
+          false
+        );
+        return response as { results: unknown[]; paging?: { next?: { after: string } } };
+      }),
+      { maxRetries: 3 }
+    );
   }
 
   /**
@@ -174,17 +310,20 @@ export class HubSpotApiClient {
     results: unknown[];
     paging?: { next?: { after: string } };
   }> {
-    return this.rateLimited(async () => {
-      const response = await this.client.crm.companies.basicApi.getPage(
-        options?.limit || 100,
-        options?.after,
-        options?.properties,
-        undefined,
-        undefined,
-        false
-      );
-      return response as { results: unknown[]; paging?: { next?: { after: string } } };
-    });
+    return this.withRetry(
+      () => this.rateLimited(async () => {
+        const response = await this.client.crm.companies.basicApi.getPage(
+          options?.limit || 100,
+          options?.after,
+          options?.properties,
+          undefined,
+          undefined,
+          false
+        );
+        return response as { results: unknown[]; paging?: { next?: { after: string } } };
+      }),
+      { maxRetries: 3 }
+    );
   }
 
   /**

@@ -29,20 +29,22 @@ async function mergeContacts(primaryId: string, secondaryIds: string[]): Promise
   const client = requireHubSpotClient();
 
   for (const secondaryId of secondaryIds) {
-    try {
-      console.log(`Merging contact ${secondaryId} into ${primaryId}...`);
+    console.log(`Merging contact ${secondaryId} into ${primaryId}...`);
 
-      // Use the HubSpot API v3 merge endpoint
-      await client.getClient().crm.contacts.basicApi.merge({
-        objectIdToMerge: secondaryId,
-        primaryObjectId: primaryId,
-      });
+    await client.withRetry(
+      async () => {
+        await client.getClient().crm.contacts.basicApi.merge({
+          objectIdToMerge: secondaryId,
+          primaryObjectId: primaryId,
+        });
+      },
+      {
+        maxRetries: 3,
+        baseDelayMs: 2000, // Start with 2s for merge operations
+      }
+    );
 
-      console.log(`Successfully merged contact ${secondaryId} into ${primaryId}`);
-    } catch (error) {
-      console.error(`Failed to merge contact ${secondaryId}:`, error);
-      throw new Error(`Failed to merge contact ${secondaryId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    console.log(`Successfully merged contact ${secondaryId} into ${primaryId}`);
   }
 }
 
@@ -54,20 +56,22 @@ async function mergeCompanies(primaryId: string, secondaryIds: string[]): Promis
   const client = requireHubSpotClient();
 
   for (const secondaryId of secondaryIds) {
-    try {
-      console.log(`Merging company ${secondaryId} into ${primaryId}...`);
+    console.log(`Merging company ${secondaryId} into ${primaryId}...`);
 
-      // Use the HubSpot API v3 merge endpoint
-      await client.getClient().crm.companies.basicApi.merge({
-        objectIdToMerge: secondaryId,
-        primaryObjectId: primaryId,
-      });
+    await client.withRetry(
+      async () => {
+        await client.getClient().crm.companies.basicApi.merge({
+          objectIdToMerge: secondaryId,
+          primaryObjectId: primaryId,
+        });
+      },
+      {
+        maxRetries: 3,
+        baseDelayMs: 2000, // Start with 2s for merge operations
+      }
+    );
 
-      console.log(`Successfully merged company ${secondaryId} into ${primaryId}`);
-    } catch (error) {
-      console.error(`Failed to merge company ${secondaryId}:`, error);
-      throw new Error(`Failed to merge company ${secondaryId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    console.log(`Successfully merged company ${secondaryId} into ${primaryId}`);
   }
 }
 
