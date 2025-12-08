@@ -59,8 +59,12 @@ const api: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_GET_STATUS_COUNTS, type);
   },
 
-  dedupMerge: async (groupId: string, primaryId: string) => {
-    return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_MERGE, groupId, primaryId);
+  dedupMerge: async (
+    groupId: string,
+    primaryId: string,
+    options?: { dryRun?: boolean; createBackup?: boolean }
+  ) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.DEDUP_MERGE, groupId, primaryId, options);
   },
 
   dedupUpdateGroupStatus: async (

@@ -13,6 +13,71 @@ export interface ExactMatchGroup {
 }
 
 /**
+ * Normalize phone number for comparison
+ * Handles international formats and extracts meaningful digits
+ */
+export function normalizePhoneNumber(phone: string | null | undefined): {
+  full: string;      // Full normalized number with country code
+  national: string;  // National number without country code
+  isInternational: boolean;
+} {
+  if (!phone) return { full: '', national: '', isInternational: false };
+
+  // Remove all non-digit characters except leading +
+  let digits = phone.replace(/[^\d+]/g, '');
+
+  // Handle + prefix
+  const hasPlus = digits.startsWith('+');
+  digits = digits.replace(/\+/g, '');
+
+  // Detect international format
+  // Common patterns: +1..., 001..., 011..., 00...
+  let isInternational = hasPlus || digits.startsWith('00') || digits.startsWith('011');
+
+  // Strip international dialing prefixes
+  if (digits.startsWith('011')) {
+    digits = digits.slice(3);
+    isInternational = true;
+  } else if (digits.startsWith('00')) {
+    digits = digits.slice(2);
+    isInternational = true;
+  }
+
+  // For US/Canada numbers starting with 1 and 11 digits
+  const isNorthAmerican = digits.length === 11 && digits.startsWith('1');
+
+  return {
+    full: digits,
+    national: isNorthAmerican ? digits.slice(1) : digits,
+    isInternational: isInternational || digits.length > 10,
+  };
+}
+
+/**
+ * Normalize domain for comparison
+ * Strips protocol, www prefix, and paths
+ */
+export function normalizeDomain(domain: string | null | undefined): string {
+  if (!domain) return '';
+
+  let normalized = domain.toLowerCase().trim();
+
+  // Strip protocol
+  normalized = normalized.replace(/^https?:\/\//, '');
+
+  // Strip www. prefix (but keep other subdomains)
+  normalized = normalized.replace(/^www\./, '');
+
+  // Strip path, query string, hash
+  normalized = normalized.split('/')[0].split('?')[0].split('#')[0];
+
+  // Strip trailing dots
+  normalized = normalized.replace(/\.+$/, '');
+
+  return normalized;
+}
+
+/**
  * Find contacts with exact email matches
  * Groups contacts that share the same email address
  */
@@ -67,44 +132,42 @@ export function findExactContactMatches(): ExactMatchGroup[] {
 export function findExactCompanyMatches(): ExactMatchGroup[] {
   const db = getDatabase();
 
-  // Find all domains that appear more than once
-  const duplicateDomains = db
-    .prepare(
-      `
-    SELECT domain, COUNT(*) as count
-    FROM companies
+  // Get all companies with domains
+  const companiesWithDomains = db.prepare(`
+    SELECT * FROM companies
     WHERE domain IS NOT NULL AND domain != ''
-    GROUP BY LOWER(domain)
-    HAVING count > 1
-  `
-    )
-    .all() as { domain: string; count: number }[];
+  `).all() as Company[];
 
-  console.log(`Found ${duplicateDomains.length} domains with duplicates`);
+  // Build normalized domain -> companies map
+  const domainGroups = new Map<string, Company[]>();
 
+  for (const company of companiesWithDomains) {
+    const normalized = normalizeDomain(company.domain);
+
+    if (!normalized) continue;
+
+    if (!domainGroups.has(normalized)) {
+      domainGroups.set(normalized, []);
+    }
+    domainGroups.get(normalized)!.push(company);
+  }
+
+  // Filter to groups with 2+ companies
   const groups: ExactMatchGroup[] = [];
 
-  // For each duplicate domain, get all companies with that domain
-  for (const { domain } of duplicateDomains) {
-    const companies = db
-      .prepare(
-        `
-      SELECT * FROM companies
-      WHERE LOWER(domain) = LOWER(?)
-      ORDER BY updated_at DESC NULLS LAST
-    `
-      )
-      .all(domain) as Company[];
-
+  for (const [domain, companies] of domainGroups) {
     if (companies.length > 1) {
       groups.push({
-        matchKey: domain.toLowerCase(),
+        matchKey: domain,
         matchField: 'domain',
-        records: companies,
+        records: companies.sort((a, b) =>
+          new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+        ),
       });
     }
   }
 
+  console.log(`Found ${groups.length} domains with duplicates`);
   return groups;
 }
 
@@ -115,45 +178,46 @@ export function findExactCompanyMatches(): ExactMatchGroup[] {
 export function findExactPhoneMatches(): ExactMatchGroup[] {
   const db = getDatabase();
 
-  // Normalize phone numbers by removing non-digit characters
-  const duplicatePhones = db
-    .prepare(
-      `
-    SELECT
-      REPLACE(REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '(', ''), ')', '') as normalized_phone,
-      COUNT(*) as count
-    FROM contacts
+  // Get all contacts with phones
+  const contactsWithPhones = db.prepare(`
+    SELECT * FROM contacts
     WHERE phone IS NOT NULL AND phone != ''
-    GROUP BY normalized_phone
-    HAVING count > 1 AND LENGTH(normalized_phone) >= 10
-  `
-    )
-    .all() as { normalized_phone: string; count: number }[];
+  `).all() as Contact[];
 
-  console.log(`Found ${duplicatePhones.length} phone numbers with duplicates`);
+  // Build phone -> contacts map with normalized phones
+  const phoneGroups = new Map<string, Contact[]>();
 
+  for (const contact of contactsWithPhones) {
+    const normalized = normalizePhoneNumber(contact.phone);
+
+    // Skip if too short
+    if (normalized.full.length < 10) continue;
+
+    // Use full number as key for international, national for domestic
+    const key = normalized.isInternational ? normalized.full : normalized.national;
+
+    if (!phoneGroups.has(key)) {
+      phoneGroups.set(key, []);
+    }
+    phoneGroups.get(key)!.push(contact);
+  }
+
+  // Filter to groups with 2+ contacts
   const groups: ExactMatchGroup[] = [];
 
-  for (const { normalized_phone } of duplicatePhones) {
-    const contacts = db
-      .prepare(
-        `
-      SELECT * FROM contacts
-      WHERE REPLACE(REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '(', ''), ')', '') = ?
-      ORDER BY updated_at DESC NULLS LAST
-    `
-      )
-      .all(normalized_phone) as Contact[];
-
+  for (const [phone, contacts] of phoneGroups) {
     if (contacts.length > 1) {
       groups.push({
-        matchKey: normalized_phone,
+        matchKey: phone,
         matchField: 'phone',
-        records: contacts,
+        records: contacts.sort((a, b) =>
+          new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+        ),
       });
     }
   }
 
+  console.log(`Found ${groups.length} phone numbers with duplicates`);
   return groups;
 }
 

@@ -237,33 +237,47 @@ ipcMain.handle(IPC_CHANNELS.DEDUP_GET_STATUS_COUNTS, async (_event, type: 'conta
   }
 });
 
-ipcMain.handle(IPC_CHANNELS.DEDUP_MERGE, async (_event, groupId: string, primaryId: string) => {
-  try {
-    console.log(`Merge requested: group=${groupId}, primary=${primaryId}`);
+ipcMain.handle(
+  IPC_CHANNELS.DEDUP_MERGE,
+  async (
+    _event,
+    groupId: string,
+    primaryId: string,
+    options?: { dryRun?: boolean; createBackup?: boolean }
+  ) => {
+    try {
+      console.log(`Merge requested: group=${groupId}, primary=${primaryId}, dryRun=${options?.dryRun ?? false}`);
 
-    const result = await executeMerge({
-      groupId,
-      primaryRecordId: primaryId,
-      createBackup: true,
-    });
+      const result = await executeMerge({
+        groupId,
+        primaryRecordId: primaryId,
+        dryRun: options?.dryRun ?? false,
+        createBackup: options?.createBackup ?? true,
+      });
 
-    if (result.success) {
-      console.log(`Merge successful: merged ${result.mergedIds.length} records`);
-    } else {
-      console.error(`Merge failed: ${result.error}`);
+      if (result.success) {
+        if (result.dryRun) {
+          console.log(`[DRY RUN] Merge preview generated for ${result.mergedIds.length} records`);
+        } else {
+          console.log(`Merge successful: merged ${result.mergedIds.length} records`);
+        }
+      } else {
+        console.error(`Merge failed: ${result.error}`);
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Merge operation error:', error);
+      return {
+        success: false,
+        primaryId,
+        mergedIds: [],
+        error: error instanceof Error ? error.message : 'Merge operation failed',
+        dryRun: options?.dryRun ?? false,
+      };
     }
-
-    return result;
-  } catch (error) {
-    console.error('Merge operation error:', error);
-    return {
-      success: false,
-      primaryId,
-      mergedIds: [],
-      error: error instanceof Error ? error.message : 'Merge operation failed',
-    };
   }
-});
+);
 
 // Export operations
 ipcMain.handle(IPC_CHANNELS.EXPORT_DUPLICATE_GROUPS, async (_event, options: ExportOptions) => {

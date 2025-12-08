@@ -4,7 +4,13 @@ import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { ComparisonView } from '../components/ComparisonView';
 import { DataViewer } from '../components/DataViewer';
-import type { DuplicateGroup, DeduplicationResult, DuplicateStatusCounts, FieldSimilarity } from '../../shared/types';
+import type {
+  DuplicateGroup,
+  DeduplicationResult,
+  DuplicateStatusCounts,
+  FieldSimilarity,
+  MergeResult,
+} from '../../shared/types';
 import { formatSimilarity, normalizeSimilarityScore } from '../../shared/formatSimilarity';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
@@ -59,13 +65,17 @@ export function ResultsPage() {
   // Codex: Use strict ConfidenceFilter type
   const [filterConfidence, setFilterConfidence] = React.useState<ConfidenceFilter>('all');
 
-  // Progress state
+  // Progress state (from claude/export-realtime-progress)
   const [progress, setProgress] = useState<{
     stage: string;
     current: number;
     total: number;
     message?: string;
   } | null>(null);
+
+  // Dry-run mode state (from main)
+  const [dryRunMode, setDryRunMode] = useState(false);
+  const [previewResult, setPreviewResult] = useState<MergeResult | null>(null);
 
   // Main: Status counts for progress bar
   const [statusCounts, setStatusCounts] = React.useState<DuplicateStatusCounts>({
@@ -74,10 +84,10 @@ export function ResultsPage() {
     merged: 0,
     total: 0,
   });
-   
+
   // Main: Search state
-  const [searchTerm, setSearchTerm] = React.useState('');
-  const [debouncedSearch, setDebouncedSearch] = React.useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -248,12 +258,26 @@ export function ResultsPage() {
   const handleMerge = async (groupId: string, primaryId: string) => {
     setIsMerging(true);
     setError('');
+    setPreviewResult(null);
 
     try {
-      const result = await window.api.dedupMerge(groupId, primaryId);
+      const result = await window.api.dedupMerge(groupId, primaryId, {
+        dryRun: dryRunMode,
+      });
 
-      if (result.success) {
-        // Remove the merged group from the list
+      if (result.dryRun && result.success) {
+        // Show preview instead of completing merge
+        setPreviewResult(result);
+        const warningsText = result.preview?.warnings.length
+          ? '\n\nWarnings:\n' + result.preview.warnings.join('\n')
+          : '\n\nNo warnings.';
+        alert(
+          `Dry Run Complete!\n\n` +
+            `Would merge ${result.mergedIds.length} records into ${result.primaryId}.` +
+            warningsText
+        );
+      } else if (result.success) {
+        // Actual merge completed
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
         loadStatusCounts();
         setSelectedGroup(null);
@@ -346,7 +370,10 @@ export function ResultsPage() {
       // 1. Confidence Filter
       if (filterConfidence !== 'all') {
         if (filterConfidence === 'high' && group.similarityScore < 0.95) return false;
-        if (filterConfidence === 'medium' && (group.similarityScore < 0.85 || group.similarityScore >= 0.95))
+        if (
+          filterConfidence === 'medium' &&
+          (group.similarityScore < 0.85 || group.similarityScore >= 0.95)
+        )
           return false;
         if (filterConfidence === 'low' && group.similarityScore >= 0.85) return false;
       }
@@ -357,14 +384,8 @@ export function ResultsPage() {
       return group.records.some((record) => {
         const r = record as any;
         const name = `${r.first_name || ''} ${r.last_name || ''}`;
-        
-        const valuesToSearch = [
-          name.trim(),
-          r.email,
-          r.company,
-          r.name,
-          r.domain,
-        ]
+
+        const valuesToSearch = [name.trim(), r.email, r.company, r.name, r.domain]
           .filter(Boolean)
           .map((value) => String(value).toLowerCase());
 
@@ -393,15 +414,30 @@ export function ResultsPage() {
   // Main: Progress calculations
   const processedCount = statusCounts.reviewed + statusCounts.merged;
   const totalCount = statusCounts.total || groups.length;
-  const progressPercentage = totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
+  const progressPercentage =
+    totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
 
   if (selectedGroup) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-        <div className="mb-4">
+        <div className="mb-4 flex items-center justify-between">
           <Button variant="secondary" onClick={() => setSelectedGroup(null)}>
             ← Back to Groups
           </Button>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={dryRunMode}
+              onChange={(e) => setDryRunMode(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Dry Run Mode
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              (Preview without merging)
+            </span>
+          </label>
         </div>
         <ComparisonView
           records={selectedGroup.records}
@@ -411,10 +447,41 @@ export function ResultsPage() {
           isMerging={isMerging}
           fieldScores={selectedGroup.fieldScores}
           similarityScore={selectedGroup.similarityScore}
+          dryRunMode={dryRunMode}
         />
         {error && (
           <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+          </div>
+        )}
+        {previewResult && previewResult.preview && (
+          <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
+              Preview Results
+            </h3>
+            <div className="text-sm text-blue-800 dark:text-blue-200">
+              <p className="mb-2">
+                Records to merge: {previewResult.preview.recordsToMerge.length}
+              </p>
+              <div className="mb-2">
+                <strong>Estimated Changes:</strong>
+                <ul className="list-disc list-inside ml-2">
+                  {previewResult.preview.estimatedChanges.map((change, i) => (
+                    <li key={i}>{change}</li>
+                  ))}
+                </ul>
+              </div>
+              {previewResult.preview.warnings.length > 0 && (
+                <div>
+                  <strong>Warnings:</strong>
+                  <ul className="list-disc list-inside ml-2">
+                    {previewResult.preview.warnings.map((warning, i) => (
+                      <li key={i}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -425,7 +492,9 @@ export function ResultsPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Duplicate Detection</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            Duplicate Detection
+          </h1>
           <p className="text-gray-600 dark:text-gray-400">
             Find and merge duplicate records in your HubSpot account
           </p>
@@ -459,7 +528,11 @@ export function ResultsPage() {
               </div>
 
               <div className="flex gap-2">
-                <Button variant="secondary" onClick={loadGroups} disabled={isLoading || isAnalyzing || isImporting}>
+                <Button
+                  variant="secondary"
+                  onClick={loadGroups}
+                  disabled={isLoading || isAnalyzing || isImporting}
+                >
                   Refresh
                 </Button>
                 <Button variant="secondary" onClick={runImport} isLoading={isImporting} disabled={isAnalyzing}>
@@ -548,9 +621,10 @@ export function ResultsPage() {
                   <div
                     className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300"
                     style={{
-                      width: progress.total > 0
-                        ? `${Math.min(100, (progress.current / progress.total) * 100)}%`
-                        : '0%'
+                      width:
+                        progress.total > 0
+                          ? `${Math.min(100, (progress.current / progress.total) * 100)}%`
+                          : '0%',
                     }}
                   />
                 </div>
@@ -589,10 +663,14 @@ export function ResultsPage() {
               <div className="space-y-3">
                 <div className="mb-6 flex gap-4 items-center flex-wrap">
                   <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Sort by:</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Sort by:
+                    </label>
                     <select
                       value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value as 'confidence' | 'recordCount')}
+                      onChange={(e) =>
+                        setSortBy(e.target.value as 'confidence' | 'recordCount')
+                      }
                       className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="confidence">Highest Confidence First</option>
@@ -601,7 +679,9 @@ export function ResultsPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Filter:</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Filter:
+                    </label>
                     <div className="flex gap-2">
                       {confidenceFilters.map(({ level, label }) => {
                         const isActive = filterConfidence === level;
@@ -617,7 +697,9 @@ export function ResultsPage() {
                                 : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
                             }`}
                           >
-                            {`${label}${level === 'all' ? ' Groups' : ' Confidence'} (${confidenceCounts[level]})`}
+                            {`${label}${level === 'all' ? ' Groups' : ' Confidence'} (${
+                              confidenceCounts[level]
+                            })`}
                           </button>
                         );
                       })}
@@ -648,9 +730,14 @@ export function ResultsPage() {
                   sortedGroups.map((group) => {
                     const isContact = group.type === 'contact';
                     const similarityPercentage = formatSimilarity(group.similarityScore);
-                    const topFields = getTopContributingFields(group.fieldScores, group.matchedFields);
+                    const topFields = getTopContributingFields(
+                      group.fieldScores,
+                      group.matchedFields
+                    );
                     const duplicateReason = buildDuplicateReasonSentence(topFields);
-                    const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(group.similarityScore);
+                    const { borderClass, priorityClass, priorityLabel } = getConfidenceStyles(
+                      group.similarityScore
+                    );
 
                     return (
                       <div
@@ -661,7 +748,9 @@ export function ResultsPage() {
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div className="space-y-2">
                             <div className="flex items-center gap-2">
-                              <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${priorityClass}`}>
+                              <span
+                                className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${priorityClass}`}
+                              >
                                 {priorityLabel}
                               </span>
                               <Badge variant="default">Group ID: {group.id}</Badge>
@@ -699,7 +788,9 @@ export function ResultsPage() {
                             </div>
                           </div>
                           <div className="flex flex-col items-end gap-2">
-                            <Badge variant={getConfidenceBadgeVariant(group.similarityScore)}>{similarityPercentage}% Confidence</Badge>
+                            <Badge variant={getConfidenceBadgeVariant(group.similarityScore)}>
+                              {similarityPercentage}% Confidence
+                            </Badge>
                             <Button
                               variant="primary"
                               size="sm"
@@ -784,8 +875,10 @@ export function ResultsPage() {
                             Why these might be duplicates:
                           </div>
                           {/* Render the human-readable reason */}
-                          <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{duplicateReason}</p>
-                          
+                          <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                            {duplicateReason}
+                          </p>
+
                           <div className="flex flex-wrap gap-1.5">
                             {topFields.slice(0, 5).map((field) => (
                               <span

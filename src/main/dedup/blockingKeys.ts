@@ -2,6 +2,7 @@ import { getDatabase } from '../db/database';
 import type { Contact, Company } from '../db/types';
 import * as fuzzball from 'fuzzball';
 import type { FuzzyMatchGroup } from './fuzzyMatch';
+import { normalizePhoneNumber, normalizeDomain } from './exactMatch';
 
 /**
  * Blocking Key Strategy for Deduplication
@@ -33,11 +34,12 @@ function generateContactBlockingKey(contact: Contact): string[] {
     }
   }
 
-  // Key 3: Phone (normalized, last 7 digits)
+  // Key 3: Phone (normalized, use national number or last 10 digits)
   if (contact.phone) {
-    const phoneDigits = contact.phone.replace(/\D/g, '');
-    if (phoneDigits.length >= 7) {
-      const suffix = phoneDigits.slice(-7);
+    const normalized = normalizePhoneNumber(contact.phone);
+    if (normalized.national.length >= 7) {
+      // Use last 10 digits of national number for blocking
+      const suffix = normalized.national.slice(-10);
       keys.push(`phone:${suffix}`);
     }
   }
@@ -57,10 +59,12 @@ function generateContactBlockingKey(contact: Contact): string[] {
 function generateCompanyBlockingKey(company: Company): string[] {
   const keys: string[] = [];
 
-  // Key 1: Domain (if exists)
+  // Key 1: Domain (normalized)
   if (company.domain) {
-    const domainLower = company.domain.toLowerCase().trim();
-    keys.push(`domain:${domainLower}`);
+    const normalized = normalizeDomain(company.domain);
+    if (normalized) {
+      keys.push(`domain:${normalized}`);
+    }
   }
 
   // Key 2: Company name prefix (first 4 chars)
@@ -71,11 +75,12 @@ function generateCompanyBlockingKey(company: Company): string[] {
     }
   }
 
-  // Key 3: Phone (normalized, last 7 digits)
+  // Key 3: Phone (normalized, use national number or last 10 digits)
   if (company.phone) {
-    const phoneDigits = company.phone.replace(/\D/g, '');
-    if (phoneDigits.length >= 7) {
-      const suffix = phoneDigits.slice(-7);
+    const normalized = normalizePhoneNumber(company.phone);
+    if (normalized.national.length >= 7) {
+      // Use last 10 digits of national number for blocking
+      const suffix = normalized.national.slice(-10);
       keys.push(`phone:${suffix}`);
     }
   }
